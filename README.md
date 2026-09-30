@@ -6,6 +6,23 @@
 
 仓库仅提交源码、测试代码和文档。`SampleSheet/`、MP3、生成的 `.jpu` / `.jianpu`、预览图、模型缓存及虚拟环境保留在本机。新克隆可新建乐谱；歌曲示例和依赖本机音频/谱例的测试，需要自行准备相应文件。
 
+**识别在哪里运行？模型在哪里？**
+
+识别在运行本项目的电脑上完成，当前使用 CPU，**没有调用云端音乐识别 API，也没有把歌曲上传到第三方**。浏览器调用的 `/api/audio/…` 是本机 Node 服务；它启动本机 Python，先用 Demucs `htdemucs` 提取人声，再用 librosa pYIN 跟踪音高。pYIN 是算法，不需要另一份神经网络权重。
+
+所有路径均相对于项目根目录：
+
+| 路径 | 内容 |
+| --- | --- |
+| `.cache/torch/hub/checkpoints/955717e8-8726e21a.th` | 当前 HTDemucs 模型权重，约 80 MB |
+| `.cache/audio-ready.json` | 模型准备状态及权重路径记录 |
+| `.venv-audio/` | 本机 Python 环境，包含 Demucs、PyTorch、librosa 等依赖 |
+| `.audio-jobs/<任务ID>/` | 上传的音频、解码片段、提取的人声和识别结果 |
+
+新机器先安装 Python 3.12，再在项目根目录执行 `npm run audio:setup`，安装依赖并下载模型；第一次准备需要联网。依赖和权重缓存齐全后，推理可以离线执行。模型加载时若缓存缺失，Demucs 可能尝试重新下载权重；下载模型不等于调用云端推理。上述环境、权重和歌曲文件均不提交到 GitHub。
+
+关键代码：[模型加载与 CPU 推理](audio/separate.py)、[音高提取](audio/transcribe.py)、[本机任务接口](audio/api.mjs)。完整架构及许可分析见前面的说明文档；本地运行不会解除预训练权重的商业使用限制。
+
 **启动**
 
 ```sh
