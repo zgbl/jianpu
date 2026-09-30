@@ -1,0 +1,11 @@
+{
+  "checkedOn": "2026-09-30",
+  "model": "htdemucs",
+  "package": "demucs==4.0.1",
+  "checkpoint": ".cache/torch/hub/checkpoints/955717e8-8726e21a.th",
+  "sha256": "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4",
+  "remoteMapping": "models: ['955717e8']\n",
+  "source": "https://github.com/facebookresearch/demucs/blob/main/demucs/remote/files.txt",
+  "licenseStatus": "No explicit commercial grant verified for this checkpoint; author states pretrained weights are not under MIT and are for scientific purposes.",
+  "authorStatement": "https://github.com/facebookresearch/demucs/issues/327#issuecomment-1134828611"
+}

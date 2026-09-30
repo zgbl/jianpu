@@ -1,0 +1,18 @@
+.venv-audio/
+.cache/
+.audio-jobs/
+__pycache__/
+.DS_Store
+~$*
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Local test music and generated scores/previews
+SampleSheet/
+*.mp3
+*.jpu
+*.jianpu
+design/previews/
+design/examples/*.svg

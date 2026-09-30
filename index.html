@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>谱间 · 音乐工作台</title><link rel="icon" href="favicon.svg"><link rel="stylesheet" href="home.css"></head>
+<body>
+ <header class="workspace-header">
+  <a class="workspace-brand" href="/" aria-label="谱间主页"><span>谱</span>谱间<small>音乐工作台</small></a>
+  <nav role="tablist" aria-label="测试页面">
+   <button id="editorTab" role="tab" aria-controls="editorPanel" aria-selected="true" data-tab="editor">简谱编辑器</button>
+   <button id="transcribeTab" role="tab" aria-controls="transcribePanel" aria-selected="false" tabindex="-1" data-tab="transcribe">听歌记谱 <small>Demo</small></button>
+  </nav>
+  <span class="local-label">本地工作空间</span>
+ </header>
+ <main>
+  <section id="editorPanel" role="tabpanel" aria-labelledby="editorTab"><iframe id="editorFrame" title="简谱编辑器" allow="autoplay"></iframe></section>
+  <section id="transcribePanel" role="tabpanel" aria-labelledby="transcribeTab" hidden><iframe id="transcribeFrame" title="听歌记谱测试页" allow="autoplay"></iframe></section>
+ </main>
+ <script type="module" src="src/home.js"></script>
+</body></html>

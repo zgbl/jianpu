@@ -1,0 +1,14 @@
+{
+  "name": "jianpu-melody-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "dev": "node server.mjs",
+    "audio:setup": "node scripts/setup-audio.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
