@@ -1,11 +1,12 @@
+import {loadPlaywright} from './playwright-runtime.mjs';
 import assert from 'node:assert/strict';
 import {readFile,mkdir} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
-import {pathToFileURL} from 'node:url';
+
 import {Readable,Writable} from 'node:stream';
 import {createAudioAPI} from '../audio/api.mjs';
 import {validate} from '../src/model.js';
-const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||'/Users/tuxy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs'));
+const {chromium}=await loadPlaywright();
 const root=process.cwd(),origin='http://localhost:51999',api=createAudioAPI(root),browser=await chromium.launch({headless:true,channel:'chrome'}),errors=[];
 class Response extends Writable{
  constructor(){super();this.chunks=[];this.status=200;this.headers={};}

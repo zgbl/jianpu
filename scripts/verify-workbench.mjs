@@ -1,5 +1,6 @@
-import assert from 'node:assert/strict';import {readFile,mkdir} from 'node:fs/promises';import {resolve,extname,sep} from 'node:path';import {pathToFileURL} from 'node:url';
-const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||'/Users/tuxy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs'));
+import {loadPlaywright} from './playwright-runtime.mjs';
+import assert from 'node:assert/strict';import {readFile,mkdir} from 'node:fs/promises';import {resolve,extname,sep} from 'node:path';
+const {chromium}=await loadPlaywright();
 const browser=await chromium.launch({headless:true,channel:'chrome'}),root=process.cwd(),origin='http://localhost:51999';
 const songText=await readFile(resolve('SampleSheet/我如此爱你/我们的输出/我如此爱你.jpu'),'utf8');
 await mkdir('design/previews',{recursive:true});

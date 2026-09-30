@@ -1,8 +1,9 @@
+import {loadPlaywright} from './playwright-runtime.mjs';
 import assert from 'node:assert/strict';
 import {readFile,mkdir} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
-import {pathToFileURL} from 'node:url';
-const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||'/Users/tuxy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs'));
+
+const {chromium}=await loadPlaywright();
 const root=process.cwd(),origin='http://localhost:51999',browser=await chromium.launch({headless:true,channel:'chrome'});
 const context=await browser.newContext({viewport:{width:1440,height:960}}),errors=[];
 await context.route('**/*',async route=>{

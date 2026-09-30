@@ -1,5 +1,6 @@
-import assert from 'node:assert/strict';import {readFile,mkdir} from 'node:fs/promises';import {resolve,extname,sep} from 'node:path';import {pathToFileURL} from 'node:url';
-const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||'/Users/tuxy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs'));
+import {loadPlaywright} from './playwright-runtime.mjs';
+import assert from 'node:assert/strict';import {readFile,mkdir} from 'node:fs/promises';import {resolve,extname,sep} from 'node:path';
+const {chromium}=await loadPlaywright();
 const browser=await chromium.launch({headless:true,channel:'chrome'}),root=process.cwd(),origin='http://localhost:51999',path='/SampleSheet/我如此爱你/我们的输出/我如此爱你-旋律.jianpu',errors=[];
 try{const context=await browser.newContext(),page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',async route=>{try{const url=new URL(route.request().url());if(url.origin!==origin)throw Error('External request');const target=resolve(root,'.'+decodeURIComponent(url.pathname)),file=target===root?resolve(root,'index.html'):target;if(!file.startsWith(root+sep))throw Error('Invalid path');await route.fulfill({body:await readFile(file),contentType:({'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'})[extname(file)]||'application/json'});}catch{await route.fulfill({status:404,body:'Not found'});}});
  await page.goto(origin+'/editor.html?score='+encodeURIComponent(path));await page.waitForFunction(()=>document.querySelectorAll('#score .digit').length===190);

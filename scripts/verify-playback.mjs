@@ -1,5 +1,6 @@
-import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {resolve,extname} from 'node:path';import {pathToFileURL} from 'node:url';
-const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||'/Users/tuxy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs'));
+import {loadPlaywright} from './playwright-runtime.mjs';
+import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {resolve,extname} from 'node:path';
+const {chromium}=await loadPlaywright();
 const root=process.cwd(),origin='http://localhost:51999',browser=await chromium.launch({headless:true,channel:'chrome'});
 try{
  const context=await browser.newContext({viewport:{width:1440,height:960}});await context.route('**/*',async route=>{try{const u=new URL(route.request().url());assert.equal(u.origin,origin);const file=resolve(root,'.'+u.pathname);await route.fulfill({body:await readFile(file),contentType:({'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'})[extname(file)]||'application/json'});}catch{await route.fulfill({status:404,body:'not found'});}});

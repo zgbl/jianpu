@@ -1,10 +1,11 @@
+import {loadPlaywright} from './playwright-runtime.mjs';
 import assert from 'node:assert/strict';
 import {readFile,mkdir} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
-import {pathToFileURL} from 'node:url';
+
 const engine=process.env.JIANPU_TEST_BROWSER||'chromium';
-const {chromium,webkit}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||(engine==='webkit'?'/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/playwright/driver/package/index.mjs':'/Users/tuxy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs')));
-const browser=await(engine==='webkit'?webkit.launch({headless:true,executablePath:'/Users/tuxy/Library/Caches/ms-playwright/webkit-1967/pw_run.sh'}):chromium.launch({headless:true,channel:'chrome'}));
+const {chromium,webkit}=await loadPlaywright();
+const browser=await(engine==='webkit'?webkit.launch({headless:true,...(process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE}:{})}):chromium.launch({headless:true,channel:'chrome'}));
 const root=process.cwd(),origin='http://localhost:51999',path='/SampleSheet/我如此爱你/我们的输出/我如此爱你.jpu',errors=[];
 const fixture=JSON.parse(await readFile(resolve(root,'.'+path),'utf8'));
 fixture.lyrics=fixture.lyrics.filter(l=>l.verse!==1||(process.env.JIANPU_TEST_FULL_SONG&&!['m4n4','m4n5','m4n6','m5n1','m5n2'].includes(l.noteId)));

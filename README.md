@@ -9,7 +9,8 @@
 **启动**
 
 ```sh
-cd /Users/tuxy/Codes/Github3/Music-JianPu
+git clone https://github.com/zgbl/jianpu.git
+cd jianpu
 npm run dev
 ```
 
