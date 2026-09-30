@@ -1,17 +1,19 @@
 import {transcriptionToScore} from './transcription-score.js';
+import {ScorePlayer,scoreTimeline,scoreMidi} from './playback.js';
 import {render} from './render.js';
 import {downloadFile,safeName} from './files.js';
 const $=id=>document.getElementById(id);
-let file=null,originalURL=null,job=null,result=null,score=null,busy=false,healthReady=false,abort=null,oscillators=[],audioContext=null,playTimer=null;
+let file=null,originalURL=null,job=null,result=null,score=null,busy=false,healthReady=false,abort=null;
 const durationText=seconds=>`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
 const status=(text,error=false)=>{$('status').textContent=text;$('status').classList.toggle('error',error);};
-function controls(){ $('recognize').disabled=!file||busy||!healthReady;$('audioFile').disabled=busy;$('trySample').disabled=busy;$('cancel').hidden=!busy;for(const id of ['sourceMode','clipStart','clipDuration'])$(id).disabled=busy;for(const id of ['download','edit','playMelody'])$(id).disabled=!score||busy;$('recognize').textContent=busy?'正在识别…':'识别主旋律';}
+function controls(){ $('recognize').disabled=!file||busy||!healthReady;$('audioFile').disabled=busy;$('trySample').disabled=busy;$('cancel').hidden=!busy;for(const id of ['sourceMode','clipStart','clipDuration'])$(id).disabled=busy;for(const id of ['download','downloadMidi','edit','playMelody'])$(id).disabled=!score||busy;$('recognize').textContent=busy?'正在识别…':'识别主旋律';}
 async function responseJSON(response){const text=await response.text();let payload;try{payload=JSON.parse(text);}catch{throw Error('音频接口尚未加载，请在终端停止后重新运行 npm run dev。');}if(!response.ok)throw Error(payload.error||'音频处理失败');return payload;}
 async function checkHealth(){
  try{const health=await responseJSON(await fetch('/api/audio/health',{cache:'no-store'}));healthReady=health.ready;$('runtime').textContent=healthReady?'人声分离模型已就绪 · 音频留在本机':'音频环境未准备完成';$('runtime').classList.toggle('ready',healthReady);$('setup').hidden=healthReady;}catch(e){healthReady=false;$('runtime').textContent=e.message;$('setup').hidden=false;}controls();
 }
 $('checkHealth').onclick=checkHealth;
-function stopMelody(){for(const node of oscillators){try{node.stop();}catch{}}oscillators=[];clearTimeout(playTimer);$('playMelody').textContent='▶ 试听识别旋律';}
+const melodyPlayer=new ScorePlayer(state=>{$('playMelody').textContent=state==='playing'?'■ 停止简谱播放':'▶ 播放简谱';});
+function stopMelody(){melodyPlayer.stop();}
 function acceptFile(incoming){
  if(busy)return;if(!incoming)return;if(!incoming.size||incoming.size>100*1024*1024){status('请选择不超过 100MB 的有效音频文件。',true);return;}
  stopMelody();$('originalPlayer').pause();$('vocalPlayer').pause();if(originalURL)URL.revokeObjectURL(originalURL);file=incoming;originalURL=URL.createObjectURL(file);$('originalPlayer').src=originalURL;$('vocalPlayer').removeAttribute('src');$('vocalPlayer').load();job=result=score=null;
@@ -26,6 +28,7 @@ for(const type of ['dragleave','drop'])$('dropzone').addEventListener(type,e=>{e
 $('sourceMode').onchange=()=>{$('modeHint').textContent=$('sourceMode').value==='mixed'?'只记录人声旋律，不对原曲的混合声部直接取音高。':'仅用于确实没有伴奏的主旋律音频；这一模式不做声部分离。';};
 function setStage(stage){const steps=['decode','separate','pitch','done'],index=stage==='rhythm'?2:steps.indexOf(stage);for(const item of $('steps').children){const at=steps.indexOf(item.dataset.stage);item.classList.toggle('active',at===index);item.classList.toggle('finished',at<index);}}
 function drawScore(){
+ stopMelody();
  if(!result)return;
  try{
   score=transcriptionToScore(result,{title:file.name.replace(/\.[^.]+$/,'')+' · 旋律草稿',bpm:+$('bpm').value,key:$('key').value,meter:+$('meter').value,firstBeat:+$('firstBeat').value});
@@ -51,12 +54,11 @@ $('recognizedScore').onclick=e=>{const group=e.target.closest('[data-note]');if(
 function updatePlayhead(time){if(!result)return;const width=+$('pitchChart').dataset.width,x=45+Math.max(0,Math.min(result.duration,time))/result.duration*(width-61);const head=$('pitchChart').querySelector('#playhead');if(head){head.setAttribute('x1',x);head.setAttribute('x2',x);}}
 for(const id of ['originalPlayer','vocalPlayer']){const player=$(id);player.addEventListener('play',()=>{stopMelody();$(id==='originalPlayer'?'vocalPlayer':'originalPlayer').pause();});player.addEventListener('timeupdate',()=>updatePlayhead(player.currentTime-(id==='originalPlayer'?(result?.clipStart||0):0)));}
 $('playMelody').onclick=async()=>{
- if(oscillators.length){stopMelody();return;}if(!result?.notes.length)return;
- try{audioContext??=new AudioContext();await audioContext.resume();$('originalPlayer').pause();$('vocalPlayer').pause();const now=audioContext.currentTime+.05,offset=result.notes[0].start;
-  for(const n of result.notes){const oscillator=audioContext.createOscillator(),gain=audioContext.createGain(),start=now+n.start-offset,end=now+n.end-offset;oscillator.type='sine';oscillator.frequency.value=440*2**((n.midi-69)/12);gain.gain.setValueAtTime(0,start);gain.gain.linearRampToValueAtTime(.11,start+.012);gain.gain.setValueAtTime(.11,Math.max(start+.012,end-.02));gain.gain.linearRampToValueAtTime(0,end);oscillator.connect(gain);gain.connect(audioContext.destination);oscillator.start(start);oscillator.stop(end+.01);oscillator.onended=()=>{oscillator.disconnect();gain.disconnect();};oscillators.push(oscillator);}
-  $('playMelody').textContent='■ 停止旋律试听';playTimer=setTimeout(stopMelody,(result.notes.at(-1).end-offset+.2)*1000);
- }catch(e){stopMelody();status('无法开始旋律试听：'+e.message,true);}
+ if(melodyPlayer.state!=='stopped'){stopMelody();return;}if(!score)return;
+ try{$('originalPlayer').pause();$('vocalPlayer').pause();await melodyPlayer.play(scoreTimeline(score));}catch(e){stopMelody();status('无法播放简谱：'+e.message,true);}
 };
+$('downloadMidi').onclick=()=>{try{if(score)downloadFile(scoreMidi(score),safeName(score.title).replace(/\.jpu$/,'.mid'),'audio/midi');}catch(e){status(e.message,true);}};
+window.addEventListener('workspace-hidden',()=>{stopMelody();$('originalPlayer').pause();$('vocalPlayer').pause();});
 $('recognize').onclick=async()=>{
  if(!file||busy)return;const start=+$('clipStart').value,duration=+$('clipDuration').value;
  if(!Number.isFinite(start)||start<0||start>=($('originalPlayer').duration||Infinity)){status('开始时间超出音频范围。',true);return;}

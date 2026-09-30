@@ -5,3 +5,5 @@
 .lyric-drop-target rect{stroke:#416d63!important;stroke-width:2;fill:#dcece3!important}.inline-lyric-editor{touch-action:none}
 
 .menu-content>a.menu-link{display:block;padding:9px 10px;text-decoration:none;color:#59616b;border-radius:4px}.menu-content>a.menu-link:hover{background:var(--accent-wash)}
+
+.playback-bar{display:flex;flex-shrink:0;align-items:center;gap:10px;padding:7px 16px;background:#f8faf9;border-bottom:1px solid #dce3df;font-size:12px;flex-wrap:wrap}.playback-bar label{display:flex;align-items:center;gap:5px}.playback-bar input{width:62px;padding:5px}.playback-bar select{padding:5px}.playback-bar>span{color:#6e7d75;font-size:11px;margin-left:auto}.playing-note .digit{fill:#bf6d21!important}.playing-note rect{fill:#f7dfb9!important;opacity:.6}@media(max-width:620px){.playback-bar{padding:7px 10px;gap:7px}.playback-bar>span{width:100%;margin:0}}
