@@ -6,7 +6,12 @@
     "start": "node server.mjs",
     "test": "node --test",
     "dev": "node server.mjs",
-    "audio:setup": "node scripts/setup-audio.mjs"
+    "audio:stems": "node scripts/setup-stems.mjs",
+    "audio:setup": "node scripts/setup-audio.mjs",
+    "audio:lyrics": "node scripts/setup-lyrics.mjs",
+    "audio:rhythm-setup": "node scripts/setup-rhythm.mjs",
+    "audio:capture-setup": "node scripts/setup-capture.mjs",
+    "audio:lyrics-align": "node scripts/setup-lyrics-align.mjs"
   },
   "engines": {
     "node": ">=20"

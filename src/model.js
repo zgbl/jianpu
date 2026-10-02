@@ -1,3 +1,4 @@
+import {keyPc,validateKeyMap,legacyKeyMap} from './pitch.js';
 import {validateLyrics} from './lyrics.js';
 export const capacity=64;
 export const measureCapacity=s=>s.meter[0]*64/s.meter[1];
@@ -19,11 +20,13 @@ export function demo(which='low'){
 export function validate(s){
  if(s?.tempo!==undefined&&(!Number.isFinite(s.tempo)||s.tempo<40||s.tempo>240))throw Error('播放速度应为 40–240 BPM');
  if(!s||s.format!=='jianpu-melody'||s.version!==2)throw Error('不支持的文件格式或版本');
- if(typeof s.title!=='string'||s.title.length>200||!['C','D','E','F','G','A','B'].includes(s.key)||!['[4,4]','[2,4]'].includes(JSON.stringify(s.meter)))throw Error('标题、调号或拍号不合法');
- if(!Array.isArray(s.measures)||!s.measures.length||s.measures.length>200)throw Error('小节数量应为 1–200');
+ if(typeof s.title!=='string'||s.title.length>200||typeof s.key!=='string'||!['[4,4]','[3,4]','[2,4]'].includes(JSON.stringify(s.meter)))throw Error('标题、调号或拍号不合法');
+ keyPc(s.key);if(s.keyMap!==undefined)validateKeyMap(s.keyMap,s.key);
+ if(!Array.isArray(s.measures)||!s.measures.length||s.measures.length>1000)throw Error('小节数量应为 1–1000');
+ if(s.manualBarlines!==undefined&&typeof s.manualBarlines!=='boolean')throw Error('人工小节线属性不合法');
  const ids=new Set(),events=new Map();let order=0;
  for(const m of s.measures){
-  if(!Array.isArray(m.notes)||m.notes.length>64)throw Error('小节音符列表不合法');
+  if(!Array.isArray(m.notes)||m.notes.length>(s.manualBarlines?512:64))throw Error('小节音符列表不合法');
   if(('final' in m&&typeof m.final!=='boolean')||('breakBefore' in m&&typeof m.breakBefore!=='boolean'))throw Error('小节排版或终止线属性不合法');
   if(typeof m.repeatStart!=='boolean'||typeof m.repeatEnd!=='boolean')throw Error('反复记号不合法');
   for(const x of [m,...m.notes]){if(typeof x.id!=='string'||!x.id||ids.has(x.id))throw Error('对象 ID 缺失或重复');ids.add(x.id);}
@@ -34,7 +37,7 @@ export function validate(s){
    if(n.degree===0&&n.accidental)throw Error('休止符不能有升降号');
    if(n.degree===0&&n.octave!==0)throw Error('休止符不能有八度点');events.set(n.id,{...n,order:order++});
   }
-  if(used(m)>measureCapacity(s))throw Error('小节超过拍号容量');
+  if(used(m)>measureCapacity(s)&&!s.manualBarlines)throw Error('小节超过拍号容量');
  }
  if(!Array.isArray(s.spans)||s.spans.length>2000)throw Error('连线列表不合法');
  for(const p of s.spans){if(typeof p.id!=='string'||ids.has(p.id))throw Error('连线 ID 不合法');ids.add(p.id);const a=events.get(p.from),b=events.get(p.to);if(!a||!b||a.order>=b.order||!['tie','slur'].includes(p.type))throw Error('连线端点不合法');if(p.type==='tie'&&(b.order!==a.order+1||!a.degree||a.degree!==b.degree||a.octave!==b.octave||(a.accidental||0)!==(b.accidental||0)))throw Error('延音线必须连接相邻的同音高音符');}
@@ -46,7 +49,7 @@ export function validate(s){
  validateLyrics(s,events);
  return s;
 }
-export function parse(raw){const s=JSON.parse(raw);if(s?.format==='jianpu-melody'&&s.version===1){s.version=2;s.spans=[];for(const m of s.measures){m.repeatStart=false;m.repeatEnd=false;}}return validate(s);}
+export function parse(raw){const s=JSON.parse(raw);if(s?.format==='jianpu-melody'&&s.version===1){s.version=2;s.spans=[];for(const m of s.measures){m.repeatStart=false;m.repeatEnd=false;}}if(!s.keyMap)s.keyMap=legacyKeyMap(s);return validate(s);}
 // Inserting music between the endpoints breaks a tie: retain notes and slurs,
 // detach only ties whose original notes are no longer consecutive.
 export function detachInterruptedTies(s){const order=new Map(s.measures.flatMap(m=>m.notes).map((n,i)=>[n.id,i])),detached=[];

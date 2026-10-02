@@ -13,14 +13,14 @@ os.environ.setdefault('TORCH_HOME', str(ROOT / '.cache/torch'))
 def progress(stage, message, fraction):
     print(json.dumps({'stage': stage, 'message': message, 'progress': fraction}, ensure_ascii=False), flush=True)
 
-def prepare():
+def prepare(model_name='htdemucs'):
     import torch
     from demucs.pretrained import get_model
     progress('model', '下载并检查人声分离模型', .1)
-    model = get_model('htdemucs')
+    model = get_model(model_name)
     assert 'vocals' in model.sources
     checkpoints = [str(p.relative_to(ROOT)) for p in (ROOT / '.cache/torch/hub/checkpoints').glob('*.th')]
-    (ROOT / '.cache/audio-ready.json').write_text(json.dumps({'model': 'htdemucs', 'checkpoints': checkpoints}), encoding='utf8')
+    (ROOT / ('.cache/audio-ready-6s.json' if model_name=='htdemucs_6s' else '.cache/audio-ready.json')).write_text(json.dumps({'model': model_name, 'checkpoints': checkpoints}), encoding='utf8')
     progress('ready', '模型已准备好，歌曲在本机处理', 1)
 
 def pitch_events(f0, voiced, confidence, hop, sr, onset_times):
@@ -106,11 +106,11 @@ def run(args):
     if len(mix) > sr * 601:
         raise ValueError('Demo 最多处理十分钟。')
     if args.mode == 'mixed':
-        if not (ROOT / '.cache/audio-ready.json').exists():
+        if not (ROOT / ('.cache/audio-ready-6s.json' if args.model=='htdemucs_6s' else '.cache/audio-ready.json')).exists():
             raise ValueError('请先运行 npm run audio:setup，准备人声分离模型。')
-        progress('separate', '正在分离人声与伴奏；此阶段最耗时', .15)
+        progress('separate', '正在提取人声、鼓、贝斯及伴奏声部；此阶段最耗时', .15)
         separated = subprocess.run([sys.executable, str(ROOT / 'audio/separate.py'),
-                                    str(output / 'clip.wav'), str(output / 'vocals.wav')], capture_output=True, timeout=1700)
+                                    str(output / 'clip.wav'), str(output / 'vocals.wav'), args.model], capture_output=True, timeout=1700)
         if separated.returncode:
             raise ValueError('人声分离失败，未对混合音频取音高。' + separated.stderr.decode(errors='replace')[-500:])
         vocal, _ = sf.read(output / 'vocals.wav', dtype='float32', always_2d=True)
@@ -132,20 +132,26 @@ def run(args):
         voiced &= rms[:len(voiced)] / (mixed_rms[:len(voiced)] + 1e-8) >= .04
     onset_times = librosa.onset.onset_detect(y=mono, sr=sample_rate, hop_length=hop, units='time')
     events = pitch_events(f0, voiced, probs, hop, sample_rate, onset_times)
-    progress('rhythm', '估计速度；保留原始时间用于试听核对', .9)
+    progress('rhythm', '从鼓声／原曲建立节拍时间轴，保留原始音符时间', .9)
     # A lightweight onset autocorrelation avoids native beat-tracker crashes on
     # this macOS runtime. Tempo remains explicitly editable in the demo.
-    bpm = estimate_tempo(mix.mean(axis=1), sr)
+    from rhythm import analyze_files
+    rhythm = analyze_files(output)
+    bpm = rhythm.get('estimatedBpm') or estimate_tempo(mix.mean(axis=1), sr)
     warnings = ['节拍、调号和附点是草稿估计，请对照原曲核对。']
     if args.mode == 'mixed':
         warnings.append('人声分离可能残留伴奏；和声、合唱、说唱及器乐主旋律不保证正确。')
+        if args.model=='htdemucs_6s':
+            warnings.append('六声部模型为实验版本，吉他、钢琴可能串音；输出声部不证明原曲一定含有该乐器。')
     if not events:
         warnings.append('没有识别到可靠的有音高主旋律；未用伴奏补音，请换一个有人声的片段。')
     track = [{'time': round(i * hop / sample_rate, 3), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 2),
               'confidence': round(float(probs[i]), 3)} for i in range(0, len(f0), 3) if voiced[i] and np.isfinite(f0[i])]
     payload = {'version': 1, 'sourceMode': args.mode, 'duration': round(len(mix) / sr, 3),
-               'clipStart': args.start, 'estimatedBpm': round(bpm, 1), 'notes': events, 'pitchTrack': track,
-               'warnings': warnings, 'method': 'htdemucs vocals + pYIN' if args.mode == 'mixed' else 'pYIN (user-supplied melody)'}
+               'rhythm': rhythm, 'clipStart': args.start, 'estimatedBpm': round(bpm, 1), 'notes': events, 'pitchTrack': track,
+               'warnings': warnings, 'separationModel': args.model if args.mode=='mixed' else None,
+               'stems': json.loads((output / 'stems.json').read_text())['sources'] if args.mode=='mixed' else ['vocals'],
+               'method': args.model+' vocals + pYIN' if args.mode == 'mixed' else 'pYIN (user-supplied melody)'}
     (output / 'result.json').write_text(json.dumps(payload, ensure_ascii=False), encoding='utf8')
     progress('done', f'识别到 {len(events)} 个候选音符', 1)
 
@@ -153,10 +159,11 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(); p.add_argument('--prepare', action='store_true')
     p.add_argument('--input'); p.add_argument('--output'); p.add_argument('--start', type=float, default=0)
     p.add_argument('--duration', type=float, default=30); p.add_argument('--mode', choices=['mixed', 'solo'], default='mixed')
+    p.add_argument('--model', choices=['htdemucs','htdemucs_6s'], default='htdemucs')
     args = p.parse_args()
     try:
         if args.prepare:
-            prepare()
+            prepare(args.model)
         else:
             run(args)
     except Exception as e:

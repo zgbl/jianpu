@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {fitManualBars} from '../src/manual-bars.js';
+import {transcriptionToScore} from '../src/transcription-score.js';
+import {webcrypto} from 'node:crypto';globalThis.crypto??=webcrypto;
+test('human says a detected single-bar span contains three bars: tempo triples',()=>{const r=fitManualBars([{time:10,bar:0},{time:14.4,bar:3}],{beatTimes:[10,11.1,12.2,13.3,14.4]});assert.ok(Math.abs(r.barDuration-4.4/3)<1e-8);assert.ok(Math.abs(r.bpm-60*4*3/4.4)<1e-7);});
+test('a row of edited boundaries defines phase and periodic extrapolation',()=>{const r=fitManualBars([{time:30,bar:0},{time:33,bar:1},{time:36,bar:2},{time:39,bar:3}]);assert.equal(r.barDuration,3);assert.equal(r.anchorTime,30);assert.equal(r.bpm,80);});
+test('beat refinement cannot overturn human metrical level',()=>{const r=fitManualBars([{time:10,bar:0},{time:14,bar:2}],{beatTimes:[10,11.34,12.68,14]});assert.ok(Math.abs(r.barDuration-2)<.01);assert.ok(Math.abs(r.anchorTime-10)<.08);});
+test('reject invalid or inconsistent manual boundaries without guessing',()=>{assert.throws(()=>fitManualBars([{time:1,bar:0}]),/至少/);assert.throws(()=>fitManualBars([{time:5,bar:0},{time:4,bar:1}]),/递增/);assert.throws(()=>fitManualBars([{time:0,bar:0},{time:3,bar:1},{time:10,bar:2}]),/不一致/);});
+test('corrected metrical level can rebar a full song beyond 200 bars',()=>{const r={estimatedBpm:180,clipStart:0,method:'test',warnings:[],notes:[{midi:60,start:0,end:448,confidence:1}]};const s=transcriptionToScore(r,{bpm:180,key:'C',rhythmMode:'fixed',barAnchor:0});assert.equal(s.measures.length,336);});
+test('3/4 uses three quarter beats per bar and human calibration uses that meter',()=>{const r={estimatedBpm:120,clipStart:0,method:'test',warnings:[],notes:[{midi:60,start:0,end:6,confidence:1}]};const s=transcriptionToScore(r,{bpm:120,key:'C',meter:3,rhythmMode:'fixed',barAnchor:0});assert.deepEqual(s.meter,[3,4]);assert.equal(s.measures.length,4);assert.equal(s.measures[1].notes[0].gridTimeStart,1.5);const fit=fitManualBars([{time:10,bar:0},{time:16,bar:4}],{meter:3});assert.equal(fit.bpm,120);});

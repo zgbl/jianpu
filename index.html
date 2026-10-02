@@ -4,15 +4,16 @@
 <body>
  <header class="workspace-header">
   <a class="workspace-brand" href="/" aria-label="谱间主页"><span>谱</span>谱间<small>音乐工作台</small></a>
-  <nav role="tablist" aria-label="测试页面">
-   <button id="editorTab" role="tab" aria-controls="editorPanel" aria-selected="true" data-tab="editor">简谱编辑器</button>
-   <button id="transcribeTab" role="tab" aria-controls="transcribePanel" aria-selected="false" tabindex="-1" data-tab="transcribe">听歌记谱 <small>Demo</small></button>
-  </nav>
-  <span class="local-label">本地工作空间</span>
+  <span class="workspace-purpose">听歌识别 · 原地编辑 · 对照校准</span>
+  <span class="local-label">音频留在本机</span>
  </header>
+ <section class="project-bar" aria-label="工程操作"><div class="project-identity"><strong id="projectName">歌曲工程</strong><span id="projectStatus" role="status">正在加载工程…</span></div><div class="project-actions"><button id="projectNew">新建工程</button><button id="projectOpen">打开 / 最近工程</button><button id="projectHistory" hidden>修订版本</button><button id="projectSaveAs">另存为</button><button id="projectSave" class="primary">保存工程</button></div></section>
  <main>
-  <section id="editorPanel" role="tabpanel" aria-labelledby="editorTab"><iframe id="editorFrame" title="简谱编辑器" allow="autoplay"></iframe></section>
-  <section id="transcribePanel" role="tabpanel" aria-labelledby="transcribeTab" hidden><iframe id="transcribeFrame" title="听歌记谱测试页" allow="autoplay"></iframe></section>
+  <section id="transcribePanel"><iframe id="transcribeFrame" title="歌曲识别与简谱编辑工作台" allow="autoplay; display-capture"></iframe></section>
  </main>
+ <input id="projectFile" type="file" accept=".jpp,application/zip" hidden>
+ <dialog id="newProjectDialog"><form id="newProjectForm"><h2>新建歌曲工程</h2><label>工程名称<input id="newProjectName" value="未命名工程" maxlength="200" required></label><label>从哪里开始<select id="newProjectStage"><option value="transcribe">导入歌曲，听歌识别</option><option value="editor">空白简谱，直接编辑</option></select></label><div class="dialog-actions"><button type="button" data-close-project="newProjectDialog">取消</button><button type="submit" class="primary">创建工程</button></div></form></dialog>
+ <dialog id="openProjectDialog"><h2>打开歌曲工程</h2><p>工程包含原曲、人声、识别结果与修订后的简谱。</p><button id="projectImport" class="primary">打开 .jpp 工程包</button><h3>本机最近工程</h3><div id="recentProjects"></div><details><summary>恢复改版前的识别任务</summary><div id="legacyProjects"></div><button id="legacyRefresh">查找旧识别</button></details><div class="dialog-actions"><button data-close-project="openProjectDialog">关闭</button></div></dialog>
+ <dialog id="projectHistoryDialog"><h2>保留的修订版本</h2><p>使用新识别结果前的人工修订会保留在这里。</p><div id="historyProjects"></div><div class="dialog-actions"><button data-close-project="projectHistoryDialog">关闭</button></div></dialog>
  <script type="module" src="src/home.js"></script>
 </body></html>

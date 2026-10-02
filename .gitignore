@@ -16,3 +16,12 @@ SampleSheet/
 *.jianpu
 design/previews/
 design/examples/*.svg
+
+.projects/
+*.jpp
+
+.audio-lyrics/
+
+# Local captured audio and encrypted input files
+.audio-captures/
+*.ncm

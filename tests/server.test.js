@@ -14,6 +14,8 @@ test('已占用端口自动切换，输出地址与实际服务一致',async()=>
     assert.ok(logs.at(-1).includes(`http://127.0.0.1:${actualPort}/`));
     const response=await fetch(`http://127.0.0.1:${actualPort}/`);
     assert.equal(response.status,200);assert.match(await response.text(),/音乐工作台/);
+    const legacy=await fetch(`http://127.0.0.1:${actualPort}/editor.html?score=%2Ftest.jpu`,{redirect:'manual'});
+    assert.equal(legacy.status,302);assert.equal(legacy.headers.get('location'),'/?score=%2Ftest.jpu');
   }finally{if(server)await close(server);await close(blocker);}
 });
 test('端口尝试耗尽时返回可操作的错误',async()=>{
