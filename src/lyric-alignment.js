@@ -25,17 +25,18 @@ export function parseLRC(text,{clipStart=0,duration=600}={}){
 }
 function candidates(score){const ties=new Set(score.spans.filter(s=>s.type==='tie').map(s=>s.to));return score.measures.flatMap(m=>m.notes).filter(n=>n.degree&&!ties.has(n.id));}
 export function applyTimedLyrics(score,chars,{verse=1,maxGap=1.2}={}){
- const next=structuredClone(score),notes=candidates(next).filter(n=>Number.isFinite(n.sourceTime)),all=next.measures.flatMap(m=>m.notes),buckets=new Map(),unplaced=[];
+ const next=structuredClone(score),notes=candidates(next).filter(n=>Number.isFinite(n.sourceTime)),all=next.measures.flatMap(m=>m.notes),buckets=new Map(),unplaced=[],accepted=[];
  if(!notes.length)throw Error('当前谱没有音频来源时间，不能按时间自动排词');
  for(const char of chars){const time=(char.start+char.end)/2;let best=null,distance=Infinity;
   for(let i=0;i<notes.length;i++){const n=notes[i],end=Number.isFinite(n.sourceEnd)?n.sourceEnd:notes[i+1]?.sourceTime??n.sourceTime+1,start=n.sourceTime,gap=time<start?start-time:time>end?time-end:0;if(gap<distance){distance=gap;best=n;}}
-  if(!best||distance>maxGap){unplaced.push(char.text);continue;}const old=buckets.get(best.id)||{noteId:best.id,verse,text:''};old.text+=char.text;buckets.set(best.id,old);
+  if(!best||distance>maxGap){unplaced.push(char.text);continue;}accepted.push(char);const old=buckets.get(best.id)||{noteId:best.id,verse,text:''};old.text+=char.text;buckets.set(best.id,old);
  }
  for(const lyric of buckets.values()){if(lyric.text.length>80)throw Error('识别时间过于集中，单音歌词超过 80 字，请缩短片段');}
  // Tie continuations belong to the same sounding note and may carry a melisma.
  for(const lyric of buckets.values()){let id=lyric.noteId;while(next.spans.some(s=>s.type==='tie'&&s.from===id))id=next.spans.find(s=>s.type==='tie'&&s.from===id).to;if(id!==lyric.noteId&&all.some(n=>n.id===id))lyric.endNoteId=id;}
  next.lyrics=[...(next.lyrics||[]).filter(l=>l.verse!==verse),...buckets.values()];
- return {score:validate(next),count:chars.length-unplaced.length,unplaced,warnings:['逐字时间由词级/句级时间估计，请试听后拖动修正。']};
+ next.lyricAlignment={version:1,verse,displayMode:'characters',source:'word-timestamps',characters:accepted.map((c,i)=>({...c,id:`timed-${verse}-${i}`,status:'estimated',evidence:'word-time-estimate'})),pending:[]};
+ return {score:validate(next),count:chars.length-unplaced.length,unplaced,warnings:['逐字时间由词级/句级时间估计；每个字独立显示和拖动。']};
 }
 export function applySequentialLyrics(score,text,{verse=1,start=0}={}){
  const next=structuredClone(score),notes=candidates(next).slice(start),chars=characters(text),buckets=new Map();if(!notes.length||!chars.length)throw Error('请输入歌词并选择有音高的起点');
@@ -98,16 +99,30 @@ export function alignLyricsByAnchors(text,words,{score=null}={}){
  return {chars,anchors,pending,estimated:chars.filter(c=>c.estimated).length,total:target.length,warnings:[...(repeated.length?['含重复歌词，时间顺序已用于匹配；请核对副歌对应段落。']:[]),...(pending.length?['未有时间依据的歌词保留为待定位，不强行塞入当前片段。']:[]),'锚点之间的漏字按旋律时间补排，请试听核对。']};
 }
 
-// Acoustic onsets remain independent of note availability and bar revisions.
-export function applyAcousticLyrics(score,alignment,{verse=1}={}){
- const next=structuredClone(score),continuations=new Set(next.spans.filter(s=>s.type==='tie').map(s=>s.to)),notes=next.measures.flatMap(m=>m.notes).filter(n=>n.degree&&!continuations.has(n.id)&&Number.isFinite(n.sourceTime)).sort((a,b)=>a.sourceTime-b.sourceTime),buckets=new Map(),pending=[];let cursor=0;
- for(const c of alignment.characters||[]){
-  if(c.status!=='acoustic'||!Number.isFinite(c.start)||!notes.length){pending.push(c);continue;}
-  while(cursor+1<notes.length&&notes[cursor+1].sourceTime<=c.start)cursor++;
-  const options=[notes[cursor],notes[cursor+1]].filter(Boolean),best=options.reduce((a,b)=>Math.abs(a.sourceTime-c.start)<=Math.abs(b.sourceTime-c.start)?a:b);
-  if(Math.abs(best.sourceTime-c.start)>1.2){pending.push(c);continue;}
-  cursor=Math.max(cursor,notes.indexOf(best));const lyric=buckets.get(best.id)||{noteId:best.id,verse,text:''};lyric.text+=c.text;buckets.set(best.id,lyric);
+// Keep reliable observations intact; missing characters receive explicit estimates.
+export function completeAcousticCharacters(alignment){
+ const chars=structuredClone(alignment.characters||[]).map((c,i)=>({...c,id:c.id||`char-${i}`}));
+ const anchors=chars.map((c,i)=>({c,i})).filter(({c})=>c.status==='acoustic'&&Number.isFinite(c.start));
+ const rates=anchors.slice(1).map((a,k)=>(a.c.start-anchors[k].c.start)/(a.i-anchors[k].i)).filter(v=>v>0&&v<2).sort((a,b)=>a-b);
+ const rate=rates.length?rates[Math.floor(rates.length/2)]:.3;
+ for(let i=0;i<chars.length;i++){
+  const c=chars[i];if(Number.isFinite(c.start)&&Number.isFinite(c.end)&&c.end>c.start)continue;
+  const left=anchors.filter(a=>a.i<i).at(-1),right=anchors.find(a=>a.i>i);
+  const start=left&&right?left.c.start+(right.c.start-left.c.start)*(i-left.i)/(right.i-left.i):left?left.c.start+rate*(i-left.i):right?Math.max(0,right.c.start-rate*(right.i-i)):i*rate;
+  chars[i]={...c,observedStart:c.start,observedEnd:c.end,start,end:start+rate,status:'estimated',evidence:'anchor-interpolation'};
  }
- next.lyrics=[...(next.lyrics||[]).filter(l=>l.verse!==verse),...buckets.values()];next.lyricAlignment={...structuredClone(alignment),verse,pending};
- return {score:validate(next),count:(alignment.characters||[]).length-pending.length,unplaced:pending.map(c=>c.text),warnings:alignment.warnings||[]};
+ return chars;
+}
+export function moveAlignedCharacter(score,id,noteId,offsetX=0){
+ const c=score.lyricAlignment?.characters.find(c=>c.id===id);
+ if(!c||!score.measures.some(m=>m.notes.some(n=>n.id===noteId)))throw Error('歌词或目标音符不存在');
+ c.placement={noteId,offsetX,manual:true};
+}
+export function applyAcousticLyrics(score,alignment,{verse=1}={}){
+ const next=structuredClone(score),characters=completeAcousticCharacters(alignment);
+ const prior=new Map((score.lyricAlignment?.characters||[]).map(c=>[c.id,c]));
+ for(const c of characters){const old=prior.get(c.id);if(old?.text===c.text&&old.placement?.manual)c.placement=structuredClone(old.placement);}
+ next.lyrics=(next.lyrics||[]).filter(l=>l.verse!==verse);
+ next.lyricAlignment={...structuredClone(alignment),characters,verse,pending:[],displayMode:'characters',legacyLyrics:alignment.legacyLyrics||structuredClone((score.lyrics||[]).filter(l=>l.verse===verse))};
+ return {score:validate(next),count:characters.length,unplaced:[],warnings:[`${characters.filter(c=>c.status==='estimated').length} 字按锚点估算，棕色标记；可逐字拖动核对。`]};
 }

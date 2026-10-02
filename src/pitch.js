@@ -1,3 +1,4 @@
+import {configureHarmony} from './chord-harmony.js';
 // One pitch convention for transcription, editing, calibration and playback.
 export const SCALE=[0,2,4,5,7,9,11];
 export const KEY_NAMES=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
@@ -29,7 +30,7 @@ export function relabelScore(score,key,map={}){
   const p=pitchToDegree(midi,key,ref);delete n.accidental;Object.assign(n,p);
   if(grace!==null){delete n.grace.accidental;Object.assign(n.grace,pitchToDegree(grace,key,ref));}
  }
- next.key=key;next.keyMap={...legacyKeyMap(next),...map,doPc:keyPc(key),doSpelling:key,referenceDoMidi:ref,revision:crypto.randomUUID()};validateKeyMap(next.keyMap,key);return next;
+ next.key=key;next.keyMap={...legacyKeyMap(next),...map,doPc:keyPc(key),doSpelling:key,referenceDoMidi:ref,revision:crypto.randomUUID()};validateKeyMap(next.keyMap,key);if(next.chordAnalysis){const configured=configureHarmony(next,next.chordAnalysis);next.chords=[...configured.chords.filter(c=>!(score.chords||[]).some(m=>m.source==='manual'&&m.measureId===c.measureId)),...(score.chords||[]).filter(c=>c.source==='manual')];next.chordConfiguration=configured.report;}return next;
 }
 export function anchorDo(midi,degree,accidental=0){if(!Number.isFinite(midi)||!Number.isInteger(degree)||degree<1||degree>7||![-1,0,1].includes(accidental))throw Error('音级锚点不合法');return mod12(Math.round(midi)-SCALE[degree-1]-accidental);}
 export function anchorConsensus(anchors){const pcs=[...new Set(anchors.map(a=>a.doPc))];return {status:pcs.length>1?'conflict':anchors.length>=2&&new Set(anchors.map(a=>a.degree)).size>=2?'verified':'insufficient',doPc:pcs.length===1?pcs[0]:null};}

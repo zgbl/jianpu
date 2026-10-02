@@ -24,3 +24,9 @@
 .audio-capture-panel{border:1px solid #d4e0db;background:#f6faf8;border-radius:8px;padding:12px;margin:12px 0}.audio-capture-panel h3{margin:0 0 8px;font-size:15px}.capture-actions{display:flex;gap:6px;flex-wrap:wrap}.audio-capture-panel button{font-size:13px;padding:8px 10px}.audio-capture-panel progress{width:100%;height:7px}.audio-capture-panel audio{width:100%;margin:8px 0}.audio-capture-panel [data-capture=appFields]{margin-top:10px}.audio-capture-panel [data-capture=appFields][hidden]{display:none}.audio-capture-panel [data-capture=appFields] label{display:grid;gap:5px}.audio-capture-panel p{font-size:12px;line-height:1.6}.audio-capture-panel [data-capture=status]{color:#3f655b;font-size:13px}
 
 .audio-capture-panel [data-capture=permissions]{background:#fff7e6;border:1px solid #dfc493;border-radius:6px;padding:10px;margin:8px 0}.audio-capture-panel [data-capture=permissions][hidden]{display:none}.audio-capture-panel [data-capture=permissions] a{font-size:13px;color:#385f55;text-decoration:underline}
+
+/* 乐谱沿页面连续滚动，不在 75vh 的内层窗口提前截断。 */
+.score-lyric-workspace .paper-area{max-height:none;overflow:visible;margin-bottom:0}
+
+/* 编辑入口始终留在屏幕手边，不依赖上方工具栏的滚动位置。 */
+.score-edit-dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:100;display:flex;align-items:center;gap:7px;padding:9px 12px;background:#fff;border:1px solid #90afa4;border-radius:8px;box-shadow:0 4px 20px #203d3326;white-space:nowrap}.score-edit-dock strong{color:#416d63;font-size:12px}.score-edit-dock button[aria-pressed=true]{background:#416d63;color:white;border-color:#416d63}.score-edit-dock button{font-size:12px;padding:8px 10px}.workspace{padding-bottom:85px}@media(max-width:600px){.score-edit-dock{width:calc(100% - 16px);gap:3px;padding:7px}.score-edit-dock strong{display:none}.score-edit-dock button{flex:1;padding:8px 3px}}

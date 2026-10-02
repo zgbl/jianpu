@@ -18,6 +18,7 @@ export function demo(which='low'){
  return {format:'jianpu-melody',version:2,title:which==='high'?'旋律片段 B · 高音与延长音':which==='ornament'?'旋律片段 C · 倚音与连线':'旋律片段 A · 低音与节奏',key:'C',meter:which==='ornament'?[2,4]:[4,4],measures,spans};
 }
 export function validate(s){
+ if(s?.guitarNotation){const g=s.guitarNotation;if(g.version!==1||!['concert','fingering'].includes(g.mode)||!['C','G'].includes(g.shapeKey)||!Number.isInteger(g.capo)||g.capo<0||g.capo>12)throw Error('吉他指型与Capo设置不合法');}
  if(s?.tempo!==undefined&&(!Number.isFinite(s.tempo)||s.tempo<40||s.tempo>240))throw Error('播放速度应为 40–240 BPM');
  if(!s||s.format!=='jianpu-melody'||s.version!==2)throw Error('不支持的文件格式或版本');
  if(typeof s.title!=='string'||s.title.length>200||typeof s.key!=='string'||!['[4,4]','[3,4]','[2,4]'].includes(JSON.stringify(s.meter)))throw Error('标题、调号或拍号不合法');

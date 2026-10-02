@@ -89,10 +89,11 @@ def main(a):
                     c.update(start=round(start+f*step,4),end=round(start+g*step,4),confidence=p,evidence='character-or-phonetic',status='acoustic' if p>=.15 else 'pending')
                 good=[c for c in chars if c['status']=='acoustic']
                 if len(good)>=len(chars)*.7:last_end=max(last_end,chars[-1]['end'])
-                else:
-                    for c in chars:c['status']='pending'
+                # A weak syllable must not discard independently supported
+                # neighbours. Keep per-character confidence and mark the line
+                # mixed/pending without erasing its reliable timing candidates.
         results.extend(chars);line_results.append(dict(id=f'line-{li}',text=line,status='aligned' if all(c['status']=='acoustic' for c in chars) else 'pending'));at+=len(line)
-    payload=dict(version=1,text=text,model=MODEL,algorithmVersion='ctc-phonetic-window-v2',audioHash=hashlib.sha256(Path(a.input).read_bytes()).hexdigest(),modelRevision=getattr(model.config,'_commit_hash',None),timeBase='clip-seconds',transcriptHash=hashlib.sha256(text.encode()).hexdigest(),lines=line_results,characters=results,warnings=['中文语音声学模型用于歌唱对齐，低置信文字保留待定位；请试听核对。'])
+    payload=dict(version=1,text=text,model=MODEL,algorithmVersion='ctc-phonetic-window-v3',audioHash=hashlib.sha256(Path(a.input).read_bytes()).hexdigest(),modelRevision=getattr(model.config,'_commit_hash',None),timeBase='clip-seconds',transcriptHash=hashlib.sha256(text.encode()).hexdigest(),lines=line_results,characters=results,warnings=['中文语音声学模型用于歌唱对齐，低置信文字保留待定位；请试听核对。'])
     Path(a.output).write_text(json.dumps(payload,ensure_ascii=False));emit('逐字对齐完成',1)
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--prepare',action='store_true');p.add_argument('--input');p.add_argument('--output');p.add_argument('--text');p.add_argument('--anchors');a=p.parse_args()
