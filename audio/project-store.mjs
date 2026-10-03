@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import {validate} from '../src/model.js';
 const newScore=title=>validate({format:'jianpu-melody',version:2,title:String(title).slice(0,200),key:'C',meter:[4,4],measures:Array.from({length:4},()=>({id:randomUUID(),notes:[],repeatStart:false,repeatEnd:false})),spans:[],lyrics:[]});
 const ID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const ASSET=/^(audio\/original\.(mp3|wav|m4a|flac|ogg|audio)|runs\/[a-f0-9-]{36}\/(clip\.wav|vocals\.wav|drums\.wav|bass\.wav|other\.wav|guitar\.wav|piano\.wav|stems\.json|key-analysis\.json|lyrics\.json|lyrics-alignment\.json|intro-melody\.json|chords\.json|result\.json|recognized\.jpu|params\.json))$/;
+const ASSET=/^(audio\/original\.(mp3|wav|m4a|flac|ogg|audio)|runs\/[a-f0-9-]{36}\/(clip\.wav|vocals\.wav|drums\.wav|bass\.wav|other\.wav|guitar\.wav|piano\.wav|stems\.json|pitch-observations\.json|melody-candidates-v3\.json|key-analysis\.json|lyrics\.json|lyrics-alignment\.json|intro-melody\.json|chords\.json|result\.json|recognized\.jpu|params\.json))$/;
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 const error=(message,status=400)=>Object.assign(Error(message),{status});
 const plain=value=>value&&typeof value==='object'&&!Array.isArray(value);
@@ -53,7 +53,7 @@ export function createProjectStore(root){
   const p=await read(id),r=p.runs.find(r=>r.id===runId);if(!r)return;p.activeRunId=runId;r.status=status;r.message=message;
   const base=`runs/${runId}`;await mkdir(resolve(folder(id),base),{recursive:true});
   // Only files present at a completed boundary are adopted; a cancelled run never claims success.
-  for(const file of status==='done'?['clip.wav','vocals.wav','drums.wav','bass.wav','other.wav','guitar.wav','piano.wav','stems.json','result.json']:[]){
+  for(const file of status==='done'?['clip.wav','vocals.wav','drums.wav','bass.wav','other.wav','guitar.wav','piano.wav','stems.json','pitch-observations.json','melody-candidates-v3.json','result.json']:[]){
    const source=resolve(jobFolder,file);if(await access(source).then(()=>true,()=>false)){await copyFile(source,resolve(folder(id),base,file));await register(p,`${base}/${file}`);}
   }
   await atomic(resolve(folder(id),base,'params.json'),r.params);await register(p,`${base}/params.json`);return write(p);

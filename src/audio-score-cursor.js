@@ -33,13 +33,18 @@ export function audioScoreTimeline(score,minimumVerses=0){
  }
  return segments.sort((a,b)=>a.start-b.start);
 }
+// MIDI follows written durations, never the recording source timestamps.
+export function midiScoreTimeline(score,timeline,minimumVerses=0){
+ const plan=layout(score,minimumVerses),notes=plan.measures.flatMap(m=>m.notes),byId=new Map(notes.map((p,i)=>[p.n.id,{p,i}]));
+ return timeline.marks.flatMap(mark=>{const found=byId.get(mark.id);if(!found)return [];const {p,i}=found,m=plan.measures[p.mi],following=notes[i+1];return [{id:mark.id,start:mark.start,end:mark.end,x:p.x-14,toX:following?.row===p.row?following.x-14:m.x+m.width-7,y:p.y-45,bottom:p.y+40+plan.verseCount*26,row:p.row}];});
+}
 export function audioScorePosition(segments,time){
  const p=segments.find(s=>time>=s.start&&time<s.end);
  if(!p)return null;
  return {...p,x:p.x+(p.toX-p.x)*Math.max(0,Math.min(1,(time-p.start)/(p.end-p.start)))};
 }
 export function createAudioScoreCursor(container,getScore,{minimumVerses=()=>0}={}){
- let segments=[],player=null,offset=()=>0,frame=0,lastRow=null;
+ let segments=[],player=null,offset=()=>0,frame=0,lastRow=null,midi=null;
  const ns='http://www.w3.org/2000/svg';
  function paint(){
   const svg=container.querySelector('svg');if(!svg)return;
@@ -52,9 +57,11 @@ export function createAudioScoreCursor(container,getScore,{minimumVerses=()=>0}=
   if(!player.paused&&lastRow!==p.row){const group=svg.querySelector(`[data-note="${CSS.escape(p.id)}"]`),rect=group?.getBoundingClientRect();if(rect&&(rect.top<0||rect.bottom>innerHeight))group.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});lastRow=p.row;}
  }
  function tick(){paint();if(player&&!player.paused&&!player.ended)frame=requestAnimationFrame(tick);else frame=0;}
- function follow(media,getOffset=()=>0){player=media;offset=getOffset;cancelAnimationFrame(frame);frame=0;tick();}
+ function follow(media,getOffset=()=>0){midi=null;segments=audioScoreTimeline(getScore(),minimumVerses());player=media;offset=getOffset;cancelAnimationFrame(frame);frame=0;tick();}
  function bind(media,getOffset=()=>0){for(const event of ['play','seeking','seeked','timeupdate','pause','ended'])media.addEventListener(event,()=>{if(event==='play'||event==='seeking'||player===media)follow(media,getOffset);});}
- function refresh(){segments=audioScoreTimeline(getScore(),minimumVerses());paint();}
- function clear(){cancelAnimationFrame(frame);frame=0;player=null;lastRow=null;container.querySelector('.audio-score-playhead')?.remove();}
- refresh();return {bind,follow,refresh,clear,noteTime:id=>segments.find(s=>s.id===id)?.start};
+ function refresh(){segments=midi?midiScoreTimeline(getScore(),midi,minimumVerses()):audioScoreTimeline(getScore(),minimumVerses());paint();}
+ function clear(){cancelAnimationFrame(frame);frame=0;player=null;midi=null;lastRow=null;container.querySelector('.audio-score-playhead')?.remove();}
+ function showMidi(timeline,time,state){cancelAnimationFrame(frame);frame=0;if(midi!==timeline){segments=midiScoreTimeline(getScore(),timeline,minimumVerses());lastRow=null;}midi=timeline;player={currentTime:time,paused:state!=='playing',ended:false};offset=()=>0;paint();}
+ function clearMidi(){if(midi){clear();refresh();}}
+ refresh();return {bind,follow,refresh,clear,showMidi,clearMidi,noteTime:id=>segments.find(s=>s.id===id)?.start};
 }

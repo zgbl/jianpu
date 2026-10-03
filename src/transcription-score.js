@@ -20,7 +20,7 @@ export function transcriptionToScore(result,{title='识别旋律',bpm=result.est
  const firstBar=grid?Math.floor(grid.toBeat(origin)/+meter)*+meter:0;
  const toUnit=time=>grid?(grid.toBeat(time)-firstBar)*4:(time-origin)/unit+phase;
  const toTime=value=>grid?grid.toTime(firstBar+value/4):origin+(value-phase)*unit;
- const score={format:'jianpu-melody',version:2,title:title.slice(0,200),key:effectiveKey,meter:[+meter,4],measures:[],spans:[],transcription:{detectedBpm:result.rhythm?.estimatedBpm??result.estimatedBpm,method:result.method,clipStart:result.clipStart,bpm:+bpm,firstNoteTime:origin,grid:'1/16',rhythmMode,barAnchor:+barAnchor,barStartTime:toTime(0),...(grid?{beatTimes:rhythmMode==='tracked'?result.rhythm?.beatTimes:[],beatSource:result.rhythm?.source,downbeatConfirmed:result.rhythm?.downbeatConfirmed===true}:{}),warnings}};
+ const score={format:'jianpu-melody',version:2,title:title.slice(0,200),key:effectiveKey,meter:[+meter,4],measures:[],spans:[],transcription:{detectedBpm:result.rhythm?.estimatedBpm??result.estimatedBpm,method:result.method,...(result.pitchDiagnostics?{pitchDiagnostics:structuredClone(result.pitchDiagnostics)}:{}),clipStart:result.clipStart,bpm:+bpm,firstNoteTime:origin,grid:'1/16',rhythmMode,barAnchor:+barAnchor,barStartTime:toTime(0),...(grid?{beatTimes:rhythmMode==='tracked'?result.rhythm?.beatTimes:[],beatSource:result.rhythm?.source,downbeatConfirmed:result.rhythm?.downbeatConfirmed===true}:{}),warnings}};
  let cursor=0,used=0,measure=null,uncertain=0;
  function append(duration,pitch,confidence,source,sourceEnd,eventKey){
   let previous=null;

@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 LIMIT = 2 * 1024 ** 3
-PATTERN = re.compile(r'^(manifest\.json|score/edited\.jpu|state/workspace\.json|audio/original\.(mp3|wav|m4a|flac|ogg|audio)|runs/[a-f0-9-]{36}/(clip\.wav|vocals\.wav|drums\.wav|bass\.wav|other\.wav|guitar\.wav|piano\.wav|stems\.json|key-analysis\.json|lyrics\.json|lyrics-alignment\.json|intro-melody\.json|chords\.json|result\.json|recognized\.jpu|params\.json))$')
+PATTERN = re.compile(r'^(manifest\.json|score/edited\.jpu|state/workspace\.json|audio/original\.(mp3|wav|m4a|flac|ogg|audio)|runs/[a-f0-9-]{36}/(clip\.wav|vocals\.wav|drums\.wav|bass\.wav|other\.wav|guitar\.wav|piano\.wav|stems\.json|pitch-observations\.json|melody-candidates-v3\.json|key-analysis\.json|lyrics\.json|lyrics-alignment\.json|intro-melody\.json|chords\.json|result\.json|recognized\.jpu|params\.json))$')
 
 def unpack(source, destination):
     folder = Path(destination)

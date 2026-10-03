@@ -1,6 +1,7 @@
 """Local vocal separation and monophonic transcription. Emits JSON progress lines."""
 import argparse
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -23,46 +24,9 @@ def prepare(model_name='htdemucs'):
     (ROOT / ('.cache/audio-ready-6s.json' if model_name=='htdemucs_6s' else '.cache/audio-ready.json')).write_text(json.dumps({'model': model_name, 'checkpoints': checkpoints}), encoding='utf8')
     progress('ready', '模型已准备好，歌曲在本机处理', 1)
 
-def pitch_events(f0, voiced, confidence, hop, sr, onset_times):
-    """Ignore unvoiced frames; stabilize vibrato, retain rests and repeated attacks."""
-    import numpy as np
-    from scipy.ndimage import median_filter
-    midi = np.zeros(len(f0), dtype=int)
-    good = voiced & np.isfinite(f0) & (confidence >= .65)
-    raw = np.zeros(len(f0))
-    raw[good] = 69 + 12 * np.log2(f0[good] / 440)
-    midi[good] = np.rint(raw[good]).astype(int)
-    stable = median_filter(midi, size=5, mode='nearest')
-    # Do not invent pitched frames where pYIN found no voice.
-    stable[~good] = 0
-    step = hop / sr
-    events = []
-    at = 0
-    while at < len(stable):
-        pitch = int(stable[at]); end = at + 1
-        while end < len(stable) and stable[end] == pitch:
-            end += 1
-        if pitch and (end - at) * step >= .075:
-            start_t, end_t = at * step, end * step
-            cuts = [start_t]
-            for t in onset_times:
-                if t - cuts[-1] >= .12 and end_t - t >= .09 and start_t < t < end_t:
-                    cuts.append(float(t))
-            cuts.append(end_t)
-            conf = float(np.mean(confidence[at:end]))
-            cents = float(np.median(np.abs(raw[at:end] - pitch)) * 100)
-            for a, b in zip(cuts, cuts[1:]):
-                events.append({'start': round(a, 4), 'end': round(b, 4), 'midi': pitch,
-                               'confidence': round(conf, 3), 'centsDeviation': round(cents, 1)})
-        at = end
-    # Merge tiny unvoiced dropouts in an otherwise sustained note.
-    merged = []
-    for e in events:
-        if merged and e['midi'] == merged[-1]['midi'] and 0 < e['start'] - merged[-1]['end'] <= .055:
-            merged[-1]['end'] = e['end']; merged[-1]['confidence'] = min(merged[-1]['confidence'], e['confidence'])
-        else:
-            merged.append(e)
-    return merged
+def pitch_events(f0, voiced, confidence, hop, sr, onset_times, energy=None):
+    from importlib import import_module
+    return import_module('pitch-segmentation').extract_events(f0, voiced, confidence, hop, sr, onset_times, energy)[0]
 
 def estimate_tempo(samples, sr):
     import numpy as np
@@ -123,7 +87,8 @@ def run(args):
     sample_rate, hop = 16000, 256
     mono = librosa.resample(vocal.mean(axis=1), orig_sr=sr, target_sr=sample_rate)
     f0, voiced, probs = librosa.pyin(mono, fmin=65.4, fmax=1046.5, sr=sample_rate,
-                                   frame_length=1024, hop_length=hop, fill_na=np.nan)
+                                   frame_length=2048, hop_length=hop, fill_na=None)
+    raw_voiced = voiced.copy()
     rms = librosa.feature.rms(y=mono, frame_length=1024, hop_length=hop)[0]
     voiced &= rms[:len(voiced)] >= max(.0008, float(np.max(rms)) * .025)
     if args.mode == 'mixed':
@@ -131,14 +96,35 @@ def run(args):
         mixed_rms = librosa.feature.rms(y=mixed_mono, frame_length=1024, hop_length=hop)[0]
         voiced &= rms[:len(voiced)] / (mixed_rms[:len(voiced)] + 1e-8) >= .04
     onset_times = librosa.onset.onset_detect(y=mono, sr=sample_rate, hop_length=hop, units='time')
-    events = pitch_events(f0, voiced, probs, hop, sample_rate, onset_times)
+    from importlib import import_module
+    baseline, baseline_pitch, baseline_diagnostics = import_module('pitch-segmentation').extract_events(f0, voiced, probs, hop, sample_rate, onset_times, rms)
+    algorithm = getattr(args, 'pitch_algorithm', 'stable-v3')
+    if algorithm == 'stable-v3':
+        # Preserve unvoiced observations; source/energy evidence is separate.
+        decoder_probs = probs.copy()
+        if args.mode == 'mixed':
+            decoder_probs[rms[:len(probs)] / (mixed_rms[:len(probs)] + 1e-8) < .04] = 0
+        events, cleaned_pitch, pitch_diagnostics = import_module('stable-pitch').extract_events(f0, raw_voiced, decoder_probs, hop, sample_rate, onset_times, rms)
+    else:
+        events, cleaned_pitch, pitch_diagnostics = baseline, baseline_pitch, baseline_diagnostics
+    metadata = {'detector': 'librosa.pyin', 'librosaVersion': librosa.__version__, 'sampleRate':sample_rate,
+                'hopLength':hop,'frameLength':2048,'energyFrameLength':1024,'center':True,'padding':'constant',
+                'timeOrigin':'clip-relative seconds','clipStart':args.start,'fmin':65.4,'fmax':1046.5,
+                'audioSha256':hashlib.sha256((output / 'vocals.wav').read_bytes()).hexdigest(),
+                'confidenceMeaning':'legacy confidence is pYIN voiced_prob, NOT pitch correctness probability'}
+    (output / 'melody-candidates-v3.json').write_text(json.dumps({'version':pitch_diagnostics['version'],
+         'selectedAlgorithm':algorithm,'metadata':metadata,'notes':events,'diagnostics':pitch_diagnostics,
+         'baseline':{'version':baseline_diagnostics['version'],'notes':baseline},
+         'onsetTimes':list(map(float,onset_times))}),encoding='utf8')
+    observations = [{'time': round(i * hop / sample_rate, 4), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 3) if np.isfinite(f0[i]) and f0[i] > 0 else None, 'voiced': bool(raw_voiced[i]), 'eligibleV2':bool(voiced[i]), 'energy':round(float(rms[i]),7), 'voicingProbability':round(float(probs[i]),4), 'pitchReliability':None, 'sourceReliability':None, 'confidence': round(float(probs[i]), 4), 'cleanedMidi': int(cleaned_pitch[i])} for i in range(len(f0))]
+    (output / 'pitch-observations.json').write_text(json.dumps({'version': pitch_diagnostics['version'], 'metadata':metadata,'frames': observations}), encoding='utf8')
     progress('rhythm', '从鼓声／原曲建立节拍时间轴，保留原始音符时间', .9)
     # A lightweight onset autocorrelation avoids native beat-tracker crashes on
     # this macOS runtime. Tempo remains explicitly editable in the demo.
     from rhythm import analyze_files
     rhythm = analyze_files(output)
     bpm = rhythm.get('estimatedBpm') or estimate_tempo(mix.mean(axis=1), sr)
-    warnings = ['节拍、调号和附点是草稿估计，请对照原曲核对。']
+    warnings = [('稳定核心 v3（实验）：请用原始旋律 MIDI 与人声核对。' if algorithm=='stable-v3' else '旧分段 v2 对照版本。'), '节拍、调号和附点是草稿估计，请对照原曲核对。']
     if args.mode == 'mixed':
         warnings.append('人声分离可能残留伴奏；和声、合唱、说唱及器乐主旋律不保证正确。')
         if args.model=='htdemucs_6s':
@@ -148,10 +134,10 @@ def run(args):
     track = [{'time': round(i * hop / sample_rate, 3), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 2),
               'confidence': round(float(probs[i]), 3)} for i in range(0, len(f0), 3) if voiced[i] and np.isfinite(f0[i])]
     payload = {'version': 1, 'sourceMode': args.mode, 'duration': round(len(mix) / sr, 3),
-               'rhythm': rhythm, 'clipStart': args.start, 'estimatedBpm': round(bpm, 1), 'notes': events, 'pitchTrack': track,
+               'pitchDiagnostics': pitch_diagnostics, 'rhythm': rhythm, 'clipStart': args.start, 'estimatedBpm': round(bpm, 1), 'notes': events, 'pitchTrack': track,
                'warnings': warnings, 'separationModel': args.model if args.mode=='mixed' else None,
                'stems': json.loads((output / 'stems.json').read_text())['sources'] if args.mode=='mixed' else ['vocals'],
-               'method': args.model+' vocals + pYIN' if args.mode == 'mixed' else 'pYIN (user-supplied melody)'}
+               'pitchAlgorithm':algorithm, 'method': (args.model+' vocals + pYIN / ' if args.mode == 'mixed' else 'pYIN / ') + pitch_diagnostics['version']}
     (output / 'result.json').write_text(json.dumps(payload, ensure_ascii=False), encoding='utf8')
     progress('done', f'识别到 {len(events)} 个候选音符', 1)
 
@@ -159,6 +145,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(); p.add_argument('--prepare', action='store_true')
     p.add_argument('--input'); p.add_argument('--output'); p.add_argument('--start', type=float, default=0)
     p.add_argument('--duration', type=float, default=30); p.add_argument('--mode', choices=['mixed', 'solo'], default='mixed')
+    p.add_argument('--pitch-algorithm', choices=['stable-v3','legacy-v2'],default='stable-v3')
     p.add_argument('--model', choices=['htdemucs','htdemucs_6s'], default='htdemucs')
     args = p.parse_args()
     try:
