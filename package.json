@@ -11,9 +11,19 @@
     "audio:lyrics": "node scripts/setup-lyrics.mjs",
     "audio:rhythm-setup": "node scripts/setup-rhythm.mjs",
     "audio:capture-setup": "node scripts/setup-capture.mjs",
-    "audio:lyrics-align": "node scripts/setup-lyrics-align.mjs"
+    "audio:lyrics-align": "node scripts/setup-lyrics-align.mjs",
+    "build:chatgpt-auth": "tsc -p vendor/siwc-local/tsconfig.json"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "dependencies": {
+    "jose": "^6.1.0",
+    "proper-lockfile": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "typescript": "^5.9.3"
   }
 }

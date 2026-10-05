@@ -86,8 +86,9 @@ def run(args):
     progress('pitch', '从主旋律声部识别音高和音符起止', .65)
     sample_rate, hop = 16000, 256
     mono = librosa.resample(vocal.mean(axis=1), orig_sr=sr, target_sr=sample_rate)
+    frame_length = getattr(args, 'pyin_frame_length', 1024)
     f0, voiced, probs = librosa.pyin(mono, fmin=65.4, fmax=1046.5, sr=sample_rate,
-                                   frame_length=2048, hop_length=hop, fill_na=None)
+                                   frame_length=frame_length, hop_length=hop, fill_na=None)
     raw_voiced = voiced.copy()
     rms = librosa.feature.rms(y=mono, frame_length=1024, hop_length=hop)[0]
     voiced &= rms[:len(voiced)] >= max(.0008, float(np.max(rms)) * .025)
@@ -108,7 +109,7 @@ def run(args):
     else:
         events, cleaned_pitch, pitch_diagnostics = baseline, baseline_pitch, baseline_diagnostics
     metadata = {'detector': 'librosa.pyin', 'librosaVersion': librosa.__version__, 'sampleRate':sample_rate,
-                'hopLength':hop,'frameLength':2048,'energyFrameLength':1024,'center':True,'padding':'constant',
+                'hopLength':hop,'frameLength':frame_length,'energyFrameLength':1024,'center':True,'padding':'constant',
                 'timeOrigin':'clip-relative seconds','clipStart':args.start,'fmin':65.4,'fmax':1046.5,
                 'audioSha256':hashlib.sha256((output / 'vocals.wav').read_bytes()).hexdigest(),
                 'confidenceMeaning':'legacy confidence is pYIN voiced_prob, NOT pitch correctness probability'}
@@ -116,7 +117,22 @@ def run(args):
          'selectedAlgorithm':algorithm,'metadata':metadata,'notes':events,'diagnostics':pitch_diagnostics,
          'baseline':{'version':baseline_diagnostics['version'],'notes':baseline},
          'onsetTimes':list(map(float,onset_times))}),encoding='utf8')
-    observations = [{'time': round(i * hop / sample_rate, 4), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 3) if np.isfinite(f0[i]) and f0[i] > 0 else None, 'voiced': bool(raw_voiced[i]), 'eligibleV2':bool(voiced[i]), 'energy':round(float(rms[i]),7), 'voicingProbability':round(float(probs[i]),4), 'pitchReliability':None, 'sourceReliability':None, 'confidence': round(float(probs[i]), 4), 'cleanedMidi': int(cleaned_pitch[i])} for i in range(len(f0))]
+    cfg = pitch_diagnostics.get('config', {})
+    probability_floor = cfg.get('continuationVoicing', .35)
+    energy_floor = max(.0008, float(np.max(rms))*.025)
+    def frame_decision(i):
+        if not np.isfinite(f0[i]) or f0[i] <= 0:
+            return 'missing-pitch'
+        if not raw_voiced[i]:
+            return 'unvoiced'
+        if args.mode == 'mixed' and rms[i]/(mixed_rms[i]+1e-8) < .04:
+            return 'source-ratio'
+        if rms[i] < energy_floor:
+            return 'low-energy'
+        if probs[i] < probability_floor:
+            return 'low-voicing'
+        return 'eligible'
+    observations = [{'time': round(i * hop / sample_rate, 4), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 3) if np.isfinite(f0[i]) and f0[i] > 0 else None, 'voiced': bool(raw_voiced[i]), 'decoderEligible': frame_decision(i)=='eligible', 'decoderRejection': frame_decision(i), 'eligibleV2':bool(voiced[i]), 'energy':round(float(rms[i]),7), 'voicingProbability':round(float(probs[i]),4), 'pitchReliability':None, 'sourceReliability':None, 'confidence': round(float(probs[i]), 4), 'cleanedMidi': int(cleaned_pitch[i])} for i in range(len(f0))]
     (output / 'pitch-observations.json').write_text(json.dumps({'version': pitch_diagnostics['version'], 'metadata':metadata,'frames': observations}), encoding='utf8')
     progress('rhythm', '从鼓声／原曲建立节拍时间轴，保留原始音符时间', .9)
     # A lightweight onset autocorrelation avoids native beat-tracker crashes on
@@ -146,6 +162,8 @@ if __name__ == '__main__':
     p.add_argument('--input'); p.add_argument('--output'); p.add_argument('--start', type=float, default=0)
     p.add_argument('--duration', type=float, default=30); p.add_argument('--mode', choices=['mixed', 'solo'], default='mixed')
     p.add_argument('--pitch-algorithm', choices=['stable-v3','legacy-v2'],default='stable-v3')
+    p.add_argument('--pyin-frame-length', type=int, choices=[1024,2048], default=1024,
+                   help='pitch-analysis window; 1024 is more local, 2048 is smoother')
     p.add_argument('--model', choices=['htdemucs','htdemucs_6s'], default='htdemucs')
     args = p.parse_args()
     try:

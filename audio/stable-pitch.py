@@ -6,11 +6,14 @@ is deliberately exposed for calibration; these defaults are not measured accurac
 import numpy as np
 from importlib import import_module
 
-VERSION = 'vocal-notes-v3'
+VERSION = 'vocal-notes-v3.2'
 DEFAULTS = dict(shortCoreWindow=.048, coreWindow=.080, vibratoWindow=.208, coreSpread=.32,
                 coreDrift=.22, coreTolerance=.45, minCore=.048,
                 seedVoicing=.65, continuationVoicing=.35, missingGap=.096,
-                mergePenalty=.7, repeatDip=.65)
+                mergePenalty=.7, repeatDip=.65, estimateTuning=True,
+                tuningMinFrames=60, tuningMinNotes=5, tuningMinConcentration=.65,
+                tuningMaxCents=35, recoverLowConfidence=True, recoveryVoicing=.01,
+                recoveryMinDuration=.16, recoveryMinCore=.12)
 runs = import_module('pitch-segmentation').runs
 
 
@@ -23,6 +26,52 @@ def median(values, weights=None):
     return float(values[order][np.searchsorted(np.cumsum(weights), weights.sum()/2)])
 
 
+def estimate_tuning(raw, valid, voiced, prob, step, cfg):
+    """Estimate a small global cents offset from reliable, locally stable frames.
+
+    Sampling is thinned to roughly 80 ms so heavily overlapping pYIN frames do
+    not dominate the circular mean. This is deliberately conservative: one
+    sustained note cannot establish the tuning reference.
+    """
+    empty = dict(applied=False, cents=0.0, concentration=0.0, sampleCount=0,
+                 distinctNotes=0, reason='disabled' if not cfg['estimateTuning'] else 'insufficient-evidence')
+    if not cfg['estimateTuning']:
+        return 0.0, empty
+    stride = max(1, round(.080 / step))
+    stable = []
+    radius = max(1, round(.080 / step / 2))
+    for i in range(radius, len(raw)-radius, stride):
+        left, right = i-radius, i+radius+1
+        ix = np.flatnonzero(valid[left:right] & voiced[left:right] & (prob[left:right] >= cfg['seedVoicing'])) + left
+        if len(ix) < max(3, round((right-left)*.7)):
+            continue
+        values = raw[ix]
+        if np.quantile(values, .75)-np.quantile(values, .25) > .25:
+            continue
+        stable.append(float(np.median(values)))
+    if len(stable) < cfg['tuningMinFrames']:
+        empty.update(sampleCount=len(stable))
+        return 0.0, empty
+    stable = np.asarray(stable)
+    distinct = len(np.unique(np.floor(stable + .5).astype(int)))
+    phases = np.exp(2j*np.pi*stable)
+    resultant = np.mean(phases)
+    concentration = float(abs(resultant))
+    cents = float(np.angle(resultant) / (2*np.pi) * 100)
+    if distinct < cfg['tuningMinNotes']:
+        empty.update(sampleCount=len(stable), distinctNotes=distinct, concentration=round(concentration, 3), reason='too-few-distinct-notes')
+        return 0.0, empty
+    if concentration < cfg['tuningMinConcentration']:
+        empty.update(sampleCount=len(stable), distinctNotes=distinct, concentration=round(concentration, 3), reason='diffuse-offsets')
+        return 0.0, empty
+    if abs(cents) > cfg['tuningMaxCents']:
+        empty.update(sampleCount=len(stable), distinctNotes=distinct, concentration=round(concentration, 3), reason='offset-out-of-safe-range')
+        return 0.0, empty
+    result = dict(applied=True, cents=round(cents, 1), concentration=round(concentration, 3),
+                  sampleCount=len(stable), distinctNotes=distinct, reason='reliable-consensus')
+    return cents / 100, result
+
+
 def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), energy=None, config=None):
     cfg = {**DEFAULTS, **(config or {})}
     step = hop / sr
@@ -31,10 +80,15 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
     raw = np.full(len(f0), np.nan)
     finite = np.isfinite(f0) & (f0 > 0)
     raw[finite] = 69 + 12*np.log2(f0[finite]/440)
-    valid = finite & (prob >= cfg['continuationVoicing'])
+    voiced = np.asarray(voiced, bool)[:len(f0)]
+    valid = finite & voiced & (prob >= cfg['continuationVoicing'])
     energy = np.asarray(energy, float) if energy is not None else None
     if energy is not None:
         valid &= energy[:len(f0)] >= max(.0008, float(np.max(energy))*.025)
+    tuning, tuning_diagnostics = estimate_tuning(raw, valid, voiced, prob, step, cfg)
+    # Keep observations untouched; the corrected copy is used only for core
+    # stability, grouping and final semitone selection.
+    raw[finite] -= tuning
     # Missing periodic observations are bridged ONLY with sustained energy and
     # compatible endpoints. Keep their pitch missing: never fabricate a curve.
     connected = valid.copy()
@@ -177,7 +231,46 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
                 events.append(event)
                 labels[begin:finish] = target
         all_cores.extend(dict(start=round(c['a']*step,4),end=round(c['b']*step,4),pitchCenterMidi=round(c['center'],4)) for c in cores)
+    recovered = []
+    if cfg['recoverLowConfidence'] and events and energy is not None:
+        # A second, explicitly uncertain lane. Never reinterpret unvoiced
+        # guesses, silent frames, source-gated (prob=0) frames, or the prelude.
+        # The strict lane and its tuning estimate remain untouched.
+        uncovered = finite & voiced & (prob >= cfg['recoveryVoicing'])
+        uncovered &= energy[:len(raw)] >= max(.0008, float(np.max(energy))*.025)
+        bounds = np.arange(len(raw))*step
+        uncovered &= (bounds >= events[0]['start']) & (bounds < events[-1]['end'])
+        for event in events:
+            uncovered &= ~((bounds >= event['start']-step/2) & (bounds < event['end']-step/2))
+        if uncovered.any():
+            recovery_f0 = np.full(len(raw), np.nan)
+            recovery_f0[uncovered] = 440*2**((raw[uncovered]-69)/12)
+            candidates, _, recovery_diag = extract_events(
+                recovery_f0, uncovered, prob, hop, sr, onset_times, energy,
+                {**cfg, 'recoverLowConfidence': False, 'estimateTuning': False,
+                 'continuationVoicing': cfg['recoveryVoicing'],
+                 'seedVoicing': cfg['recoveryVoicing'], 'minCore': .08,
+                 'missingGap': 0})
+            for event in candidates:
+                core_seconds = sum(max(0, min(event['end'], c['end'])-max(event['start'], c['start']))
+                                   for c in recovery_diag['cores'])
+                if event['end']-event['start'] < cfg['recoveryMinDuration'] or core_seconds < cfg['recoveryMinCore']:
+                    continue
+                # Retain a proposed pitch, not a confident transcription.
+                event.update(pitchStatus='uncertain', confidence=0,
+                             recoveryReason='low-voicing-stable-evidence',
+                             reviewRequired=True, boundaryStatus='uncertain')
+                recovered.append(event)
+                begin, finish = event['evidenceFrameRange']
+                labels[begin:finish] = event['midi']
+            all_cores.extend(c for c in recovery_diag['cores'] if any(
+                c['start'] < e['end'] and c['end'] > e['start'] for e in recovered))
+    events = sorted(events+recovered, key=lambda e: e['start'])
     return events, labels, dict(version=VERSION,config=cfg,cores=all_cores,filledDropouts=filled,
                                uncertainEvents=sum(e['pitchStatus']=='uncertain' for e in events),
                                confidenceMeaning='voicingProbability is not pitch correctness probability',
-                               secondaryDetector=None,tuningCents=None)
+                               recoveredLowConfidenceEvents=len(recovered),
+                               energyThreshold=max(.0008, float(np.max(energy))*.025) if energy is not None else None,
+                               secondaryDetector=None,tuningCents=tuning_diagnostics['cents'],
+                               tuning=tuning_diagnostics,
+                               voicedMaskApplied=True)

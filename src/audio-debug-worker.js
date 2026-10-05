@@ -1,0 +1,3 @@
+import {peakEnvelope,spectrum} from './audio-debug-data.js';
+let samples,sampleRate;
+self.onmessage=({data})=>{try{if(data.type==='load'){samples=data.samples;sampleRate=data.sampleRate;const p=peakEnvelope(samples);self.postMessage({type:'ready',...p,sampleRate,duration:samples.length/sampleRate},[p.min.buffer,p.max.buffer]);}else if(data.type==='spectrum'&&samples){const result=spectrum(samples,sampleRate,data.start,data.end,{size:data.size,minMidi:data.minMidi,maxMidi:data.maxMidi});self.postMessage({type:'spectrum',id:data.id,...result},[result.values.buffer]);}}catch(e){self.postMessage({type:'error',message:e.message,id:data.id});}};

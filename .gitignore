@@ -25,3 +25,6 @@ design/examples/*.svg
 # Local captured audio and encrypted input files
 .audio-captures/
 *.ncm
+
+#Private files:
+doc/ROADMAP_TRADEMARK_PROTECTION.md

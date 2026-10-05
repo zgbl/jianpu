@@ -4,7 +4,12 @@ export function validateLyrics(score,events){
  if(!Array.isArray(score.lyrics)||score.lyrics.length>10000)throw Error('歌词列表不合法');
  const keys=new Set();
  for(const l of score.lyrics){const n=events.get(l.noteId),end=l.endNoteId?events.get(l.endNoteId):null,key=`${l.noteId}:${l.verse}`;
-  if(!n||!n.degree||!Number.isInteger(l.verse)||l.verse<1||l.verse>4||typeof l.text!=='string'||l.text.length>80||!l.text.trim()||keys.has(key))throw Error('歌词音符、段落或文字不合法');
+  const context=`歌词“${typeof l.text==='string'?l.text:'未知'}”（noteId=${l.noteId}，verse=${l.verse}）`;
+  if(!n)throw Error(`歌词音符、段落或文字不合法：${context} 引用了不存在的音符`);
+  if(!n.degree)throw Error(`歌词音符、段落或文字不合法：${context} 引用了休止符 degree=0`);
+  if(!Number.isInteger(l.verse)||l.verse<1||l.verse>4)throw Error(`歌词音符、段落或文字不合法：${context} 的 verse 必须为整数 1–4`);
+  if(typeof l.text!=='string'||l.text.length>80||!l.text.trim())throw Error(`歌词音符、段落或文字不合法：${context} 的文字须为非空字符串，最多80字符`);
+  if(keys.has(key))throw Error(`歌词音符、段落或文字不合法：${context} 在同一音符同一段重复`);
   if(l.offsetX!==undefined&&(!Number.isFinite(l.offsetX)||Math.abs(l.offsetX)>2000))throw Error('歌词位置不合法');
   if(l.endNoteId&&(!end||end.order<n.order))throw Error('拖腔结束音符不合法');keys.add(key);
  }

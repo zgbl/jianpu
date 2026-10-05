@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>图片识谱 · 谱间</title><link rel="stylesheet" href="score-image.css"></head>
+<body><main class="page">
+ <header><div><p class="eyebrow">图片导入 · 本机识别</p><h1>把现成简谱带进来</h1><p class="intro">一首歌可以有多张谱图。连续粘贴截图或一次多选，按顺序排列后一起识别；校对音符、歌词和和弦，再导入当前工程。</p></div><span class="privacy">图片仅在本机处理</span></header>
+ <section class="dropzone" id="dropzone" tabindex="0" aria-label="粘贴或拖入乐谱图片"><div><strong>在这里连续粘贴多张截图</strong><span>也可以拖入多张图片，或</span><button id="chooseImage" type="button">选择多张图片</button><small>支持 PNG、JPEG、WEBP、TIFF；每张最大 24 MB。PDF 请先导出为图片。</small></div><input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/tiff" multiple hidden></section>
+ <section id="work" hidden><div class="preview"><div class="section-title"><div><h2 id="previewTitle">原图</h2><p id="previewDescription">图片会保留用于逐项对照。</p></div><button id="addImages" type="button">＋ 添加图片</button></div><img id="previewImage" alt="待识别简谱"><div id="pageList" class="page-list" aria-label="谱图顺序"></div></div>
+  <section class="recognize"><div class="section-title"><div><h2>识别与校对</h2><p id="status">等待识别</p></div><button id="recognize" class="primary">识别全部图片</button></div><div id="error" role="alert" hidden></div>
+   <div id="editor" hidden><div class="metadata"><label>曲名<input id="title" value="图片导入的简谱"></label><label>简谱 1<select id="key"></select></label><label>拍号<select id="meter"><option value="4/4">4/4</option><option value="3/4">3/4</option><option value="2/4">2/4</option><option value="6/8">6/8</option></select></label></div>
+    <p class="hint">按图片上的简谱行、小节线和减时线生成初稿。橙色拍数表示仍需校对；草稿可以导入工程后继续编辑，不必在这里逐项改完。</p>
+    <div id="measureAudit" class="measure-audit" aria-live="polite"></div>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>图页</th><th>小节</th><th>音符</th><th>升降</th><th>八度</th><th>时值</th><th>附点</th><th>对应歌词</th></tr></thead><tbody id="notes"></tbody></table></div>
+    <details><summary>和弦校对（每小节可有多个）</summary><div class="chords" id="chords"></div><button id="addChord" type="button">＋ 添加和弦</button></details>
+    <details><summary>查看本机文字识别原文</summary><pre id="raw"></pre></details>
+    <div class="actions"><button id="cancel">取消图片</button><button id="import" class="primary">导入草稿到工程并继续编辑</button></div>
+   </div>
+  </section>
+ </section><canvas id="canvas" hidden></canvas>
+ <script type="module" src="src/score-image.js"></script>
+</main></body></html>

@@ -1,6 +1,7 @@
 // Human bar counts establish the metrical level. Detected pulses can refine
 // timing only inside that level; they cannot divide the tempo by two or three.
 export function fitManualBars(points,{meter=4,beatTimes=[]}={}){
+ meter=+meter===6?3:+meter;
  if(![2,3,4].includes(+meter)||!Array.isArray(points)||points.length<2)throw Error('至少标定两个小节边界，才能计算小节时长');
  const marks=points.map(p=>({time:+p.time,bar:+p.bar})).sort((a,b)=>a.bar-b.bar);
  if(marks.some((p,i)=>!Number.isFinite(p.time)||p.time<0||!Number.isInteger(p.bar)||p.bar<0||(i&&(p.bar<=marks[i-1].bar||p.time<=marks[i-1].time))))throw Error('小节编号和时间必须分别递增，不能重叠');

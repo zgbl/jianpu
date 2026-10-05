@@ -20,7 +20,7 @@ export function layout(score,minimumVerses=0){
   const group=prepared.slice(offset,offset+count),total=group.reduce((sum,p)=>sum+p.width,0),scale=Math.max(1,(maxWidth-left-right)/total);let x=left;
   for(const p of group){const {m,mi,notes,startPad}=p,width=p.width*scale,y=baseline+row*rowGap;let nx=x+startPad*scale;
    for(const n of notes){n.width*=scale;n.x=nx+(n.n.grace?22:0)+n.leftInset;n.y=y;n.row=row;n.mi=mi;positions.set(n.n.id,n);nx+=n.width;}
-   const groups=[];for(const n of notes){const g=groups.at(-1);if(n.beams&&g&&g.at(-1).beams&&!n.n.beamBreak&&Math.floor(g.at(-1).start/16)===Math.floor(n.start/16))g.push(n);else groups.push([n]);}
+   const groups=[];for(const n of notes){const g=groups.at(-1);if(n.beams&&g&&g.at(-1).beams&&!n.n.beamBreak&&(n.n.tuplet&&g.at(-1).n.tuplet?.id===n.n.tuplet.id||!n.n.tuplet&&!g.at(-1).n.tuplet&&Math.floor((g.at(-1).start+1e-7)/16)===Math.floor((n.start+1e-7)/16)))g.push(n);else groups.push([n]);}
    measures.push({m,mi,x,y,row,width,notes,groups});x+=width;
   }offset+=count;row++;
  }

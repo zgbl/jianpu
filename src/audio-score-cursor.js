@@ -1,4 +1,5 @@
 import {layout} from './layout.js';
+import {measureCapacity} from './model.js';
 
 // Source seconds stay independent of edited tempo. A quantized source event may
 // span several tied glyphs; divide its real duration by their written durations.
@@ -31,6 +32,22 @@ export function audioScoreTimeline(score,minimumVerses=0){
   const total=rests.reduce((s,p)=>s+p.duration,0);let elapsed=0;
   for(const p of rests){const start=a.end+(b.start-a.end)*elapsed/total;elapsed+=p.duration;const following=notes[notes.indexOf(p)+1],m=plan.measures[p.mi];segments.push({id:p.n.id,start,end:a.end+(b.start-a.end)*elapsed/total,x:p.x-14,toX:following?.row===p.row?following.x-14:m.x+m.width-7,y:p.y-45,bottom:p.y+40+plan.verseCount*26,row:p.row});}
  }
+ // Hand-written prefix/suffix notes have no recording timestamps. Estimate
+ // them OUTWARD from the nearest recorded glyph, never from the old bar origin.
+ // Existing recording anchors must remain unchanged after inserting bars.
+ if(sounding.length){
+  const written=new Map();let position=0;
+  for(const m of plan.measures){let used=0;for(const p of m.notes){written.set(p.n.id,position+used);used+=p.duration;}position+=m.m.manualDurationTicks??measureCapacity(score);}
+  const first=sounding[0],last=sounding.at(-1),from=notes.findIndex(p=>p.n.id===first.id),to=notes.findIndex(p=>p.n.id===last.id);
+  const unit=60/(score.transcription?.bpm||score.tempo||120)/16,minTime=-(score.transcription?.clipStart||0);
+  for(const p of [...notes.slice(0,from),...notes.slice(to+1)]){
+   const before=notes.indexOf(p)<from,anchor=before?first:last,anchorNote=notes.find(n=>n.n.id===anchor.id);
+   const start=before?first.start+(written.get(p.n.id)-written.get(first.id))*unit:last.end+(written.get(p.n.id)-written.get(last.id)-anchorNote.duration)*unit;
+   const end=start+p.duration*unit;if(end<=minTime)continue;
+   const following=notes[notes.indexOf(p)+1],m=plan.measures[p.mi];
+   segments.push({id:p.n.id,start:Math.max(start,minTime),end,x:p.x-14,toX:following?.row===p.row?following.x-14:m.x+m.width-7,y:p.y-45,bottom:p.y+40+plan.verseCount*26,row:p.row,timingSource:before?'estimated-prefix':'estimated-suffix'});
+  }
+ }
  return segments.sort((a,b)=>a.start-b.start);
 }
 // MIDI follows written durations, never the recording source timestamps.
@@ -54,6 +71,7 @@ export function createAudioScoreCursor(container,getScore,{minimumVerses=()=>0}=
   if(!head){head=document.createElementNS(ns,'g');head.classList.add('audio-score-playhead');head.setAttribute('pointer-events','none');head.setAttribute('aria-hidden','true');const line=document.createElementNS(ns,'line');line.style.stroke='#c45d32';line.style.strokeWidth='2';line.setAttribute('vector-effect','non-scaling-stroke');const cap=document.createElementNS(ns,'path');cap.style.fill='#c45d32';cap.style.stroke='none';head.append(line,cap);svg.append(head);}
   head.dataset.note=p.id;head.dataset.time=String(player.currentTime-offset());head.setAttribute('transform',`translate(${p.x} 0)`);
   const line=head.firstChild;line.setAttribute('x1','0');line.setAttribute('x2','0');line.setAttribute('y1',p.y);line.setAttribute('y2',p.bottom);head.lastChild.setAttribute('d',`M -5 ${p.y-6} L 5 ${p.y-6} L 0 ${p.y+1} Z`);
+  line.setAttribute('stroke-dasharray',p.timingSource?.startsWith('estimated')?'4 3':'none');
   if(!player.paused&&lastRow!==p.row){const group=svg.querySelector(`[data-note="${CSS.escape(p.id)}"]`),rect=group?.getBoundingClientRect();if(rect&&(rect.top<0||rect.bottom>innerHeight))group.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});lastRow=p.row;}
  }
  function tick(){paint();if(player&&!player.paused&&!player.ended)frame=requestAnimationFrame(tick);else frame=0;}

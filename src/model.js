@@ -2,8 +2,8 @@ import {keyPc,validateKeyMap,legacyKeyMap} from './pitch.js';
 import {validateLyrics} from './lyrics.js';
 export const capacity=64;
 export const measureCapacity=s=>s.meter[0]*64/s.meter[1];
-export const ticks=n=>64/n.base*(n.dots?1.5:1);
-export const used=m=>m.notes.reduce((s,n)=>s+ticks(n),0);
+export const ticks=n=>64/n.base*(n.dots?1.5:1)*(n.tuplet?n.tuplet.normal/n.tuplet.actual:1);
+export const used=m=>Math.round(m.notes.reduce((s,n)=>s+ticks(n),0)*1e9)/1e9;
 export const note=(degree=1,base=4,octave=0,dots=0)=>({id:crypto.randomUUID(),degree,base,octave,dots});
 const measure=notes=>({id:crypto.randomUUID(),notes,repeatStart:false,repeatEnd:false});
 const from=rows=>rows.map(row=>measure(row.map(args=>note(...args))));
@@ -21,7 +21,7 @@ export function validate(s){
  if(s?.guitarNotation){const g=s.guitarNotation;if(g.version!==1||!['concert','fingering'].includes(g.mode)||!['C','G'].includes(g.shapeKey)||!Number.isInteger(g.capo)||g.capo<0||g.capo>12)throw Error('吉他指型与Capo设置不合法');}
  if(s?.tempo!==undefined&&(!Number.isFinite(s.tempo)||s.tempo<40||s.tempo>240))throw Error('播放速度应为 40–240 BPM');
  if(!s||s.format!=='jianpu-melody'||s.version!==2)throw Error('不支持的文件格式或版本');
- if(typeof s.title!=='string'||s.title.length>200||typeof s.key!=='string'||!['[4,4]','[3,4]','[2,4]'].includes(JSON.stringify(s.meter)))throw Error('标题、调号或拍号不合法');
+ if(typeof s.title!=='string'||s.title.length>200||typeof s.key!=='string'||!['[4,4]','[3,4]','[2,4]','[6,8]'].includes(JSON.stringify(s.meter)))throw Error('标题、调号或拍号不合法');
  keyPc(s.key);if(s.keyMap!==undefined)validateKeyMap(s.keyMap,s.key);
  if(!Array.isArray(s.measures)||!s.measures.length||s.measures.length>1000)throw Error('小节数量应为 1–1000');
  if(s.manualBarlines!==undefined&&typeof s.manualBarlines!=='boolean')throw Error('人工小节线属性不合法');
@@ -33,12 +33,15 @@ export function validate(s){
   for(const x of [m,...m.notes]){if(typeof x.id!=='string'||!x.id||ids.has(x.id))throw Error('对象 ID 缺失或重复');ids.add(x.id);}
   for(const n of m.notes){
    if(!Number.isInteger(n.degree)||n.degree<0||n.degree>7||![1,2,4,8,16].includes(n.base)||![-2,-1,0,1,2].includes(n.octave)||![0,1].includes(n.dots)||('beamBreak' in n&&typeof n.beamBreak!=='boolean'))throw Error('音符属性不合法');
+   if(n.tuplet&&(!n.tuplet.id||typeof n.tuplet.id!=='string'||n.tuplet.actual!==3||n.tuplet.normal!==2||n.dots!==0))throw Error('三连音须指定 id、actual:3、normal:2，当前不支持附点三连音');
    if(n.accidental!==undefined&&![-1,0,1].includes(n.accidental))throw Error('升降号不合法');
    if(n.grace&&(!n.degree||!Number.isInteger(n.grace.degree)||n.grace.degree<1||n.grace.degree>7||![-2,-1,0,1,2].includes(n.grace.octave)||![8,16].includes(n.grace.base)))throw Error('倚音属性不合法');
    if(n.degree===0&&n.accidental)throw Error('休止符不能有升降号');
    if(n.degree===0&&n.octave!==0)throw Error('休止符不能有八度点');events.set(n.id,{...n,order:order++});
   }
-  if(used(m)>measureCapacity(s)&&!s.manualBarlines)throw Error('小节超过拍号容量');
+  const triplets=new Map();for(let i=0;i<m.notes.length;i++){const n=m.notes[i];if(n.tuplet){const group=triplets.get(n.tuplet.id)||[];group.push(i);triplets.set(n.tuplet.id,group);}}
+  for(const [id,indices] of triplets){if(ids.has(id))throw Error('三连音组 ID 重复');ids.add(id);if(indices.length!==3||indices[2]-indices[0]!==2||indices.some(i=>m.notes[i].base!==m.notes[indices[0]].base))throw Error('三连音组须为同小节内连续三个等时值音符或休止符');}
+  if(used(m)>measureCapacity(s)+1e-7&&!s.manualBarlines)throw Error('小节超过拍号容量');
  }
  if(!Array.isArray(s.spans)||s.spans.length>2000)throw Error('连线列表不合法');
  for(const p of s.spans){if(typeof p.id!=='string'||ids.has(p.id))throw Error('连线 ID 不合法');ids.add(p.id);const a=events.get(p.from),b=events.get(p.to);if(!a||!b||a.order>=b.order||!['tie','slur'].includes(p.type))throw Error('连线端点不合法');if(p.type==='tie'&&(b.order!==a.order+1||!a.degree||a.degree!==b.degree||a.octave!==b.octave||(a.accidental||0)!==(b.accidental||0)))throw Error('延音线必须连接相邻的同音高音符');}
@@ -56,7 +59,9 @@ export function parse(raw){const s=JSON.parse(raw);if(s?.format==='jianpu-melody
 export function detachInterruptedTies(s){const order=new Map(s.measures.flatMap(m=>m.notes).map((n,i)=>[n.id,i])),detached=[];
  s.spans=s.spans.filter(p=>{if(p.type==='tie'&&order.has(p.from)&&order.has(p.to)&&order.get(p.to)!==order.get(p.from)+1){detached.push(p);return false;}return true;});return detached;
 }
-export function insert(s,index,n,at){const m=s.measures[index];if(used(m)+ticks(n)>measureCapacity(s))throw Error('小节超过拍号容量，请缩短时值或切换小节');m.notes.splice(at??m.notes.length,0,n);return detachInterruptedTies(s);}
-export function change(s,mi,id,patch){const m=s.measures[mi],i=m.notes.findIndex(n=>n.id===id);if(i<0)throw Error('请选择音符');const next={...m.notes[i],...patch};if(next.degree===0){next.octave=0;delete next.grace;delete next.accidental;}const copy=structuredClone(s);copy.measures[mi].notes[i]=next;if(!next.degree&&copy.lyrics)copy.lyrics=copy.lyrics.filter(l=>l.noteId!==id);validate(copy);m.notes[i]=next;if(!next.degree&&s.lyrics)s.lyrics=s.lyrics.filter(l=>l.noteId!==id);}
+export function insert(s,index,n,at){const m=s.measures[index];if(used(m)+ticks(n)>measureCapacity(s)+1e-7)throw Error('小节超过拍号容量，请缩短时值或切换小节');m.notes.splice(at??m.notes.length,0,n);return detachInterruptedTies(s);}
+export function change(s,mi,id,patch){const m=s.measures[mi],i=m.notes.findIndex(n=>n.id===id);if(i<0)throw Error('请选择音符');const next={...m.notes[i],...patch};if(['degree','octave','accidental'].some(k=>k in patch)){delete next.reviewReason;delete next.reviewRequired;delete next.recoveryReason;next.pitchStatus='manual-confirmed';}if(next.degree===0){next.octave=0;delete next.grace;delete next.accidental;}const copy=structuredClone(s);copy.measures[mi].notes[i]=next;if(!next.degree&&copy.lyrics)copy.lyrics=copy.lyrics.filter(l=>l.noteId!==id);validate(copy);m.notes[i]=next;if(!next.degree&&s.lyrics)s.lyrics=s.lyrics.filter(l=>l.noteId!==id);}
 export function remove(s,ids){for(const m of s.measures)m.notes=m.notes.filter(n=>!ids.includes(n.id));s.spans=s.spans.filter(p=>!ids.includes(p.from)&&!ids.includes(p.to));if(s.lyrics)s.lyrics=s.lyrics.filter(l=>!ids.includes(l.noteId)).map(l=>{if(l.endNoteId&&ids.includes(l.endNoteId)){const next={...l};delete next.endNoteId;return next;}return l;});}
 export function connect(s,type,from,to){const copy=structuredClone(s);const p={id:crypto.randomUUID(),type,from,to};copy.spans.push(p);validate(copy);s.spans.push(p);}
+
+export const parseMeter=value=>Array.isArray(value)?value:String(value).includes('/')?String(value).split('/').map(Number):Number(value)===6?[6,8]:[Number(value),4];

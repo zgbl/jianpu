@@ -13,8 +13,9 @@ const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application
 const error=(message,status=400)=>Object.assign(Error(message),{status});
 const plain=value=>value&&typeof value==='object'&&!Array.isArray(value);
 function validateWorkspace(value){
- if(!plain(value)||JSON.stringify(value).length>128000)throw error('工作状态不合法');
+ if(!plain(value)||JSON.stringify(value).length>4_000_000)throw error('工作状态不合法');
  if(value.stage!==undefined&&!['editor','transcribe'].includes(value.stage))throw error('工程阶段不合法');
+ for(const key of ['modelImage','comparison'])if(value[key]!==undefined){if(!plain(value[key]))throw error('比较谱状态不合法');if(value[key].score)validate(value[key].score);}
  for(const key of ['editor','transcribe'])if(value[key]!==undefined&&!plain(value[key]))throw error('工作视图状态不合法');
  const editor=value.editor;if(editor){if(editor.range!==undefined&&(!Array.isArray(editor.range)||editor.range.some(v=>typeof v!=='string')))throw error('选区不合法');for(const key of ['active','zoom','scrollTop','scrollLeft','originalTime','vocalTime'])if(editor[key]!==undefined&&(!Number.isFinite(editor[key])||editor[key]<0))throw error('工作位置不合法');}
  return value;

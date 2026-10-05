@@ -30,3 +30,4 @@
 
 /* 编辑入口始终留在屏幕手边，不依赖上方工具栏的滚动位置。 */
 .score-edit-dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:100;display:flex;align-items:center;gap:7px;padding:9px 12px;background:#fff;border:1px solid #90afa4;border-radius:8px;box-shadow:0 4px 20px #203d3326;white-space:nowrap}.score-edit-dock strong{color:#416d63;font-size:12px}.score-edit-dock button[aria-pressed=true]{background:#416d63;color:white;border-color:#416d63}.score-edit-dock button{font-size:12px;padding:8px 10px}.workspace{padding-bottom:85px}@media(max-width:600px){.score-edit-dock{width:calc(100% - 16px);gap:3px;padding:7px}.score-edit-dock strong{display:none}.score-edit-dock button{flex:1;padding:8px 3px}}
+.image-score-review{padding:8px 12px;background:#fff0e5;color:#8d451e;font-size:12px;font-weight:700;border-top:1px solid #eac8ad}.image-score-review[hidden]{display:none}
