@@ -3,9 +3,9 @@ import {measureCapacity} from './model.js';
 
 // Source seconds stay independent of edited tempo. A quantized source event may
 // span several tied glyphs; divide its real duration by their written durations.
-export function audioScoreTimeline(score,minimumVerses=0){
+export function audioScoreTimeline(score,minimumVerses=0,providedPlan=null){
  if(!score)return [];
- const plan=layout(score,minimumVerses),notes=plan.measures.flatMap(m=>m.notes),segments=[];
+ const plan=providedPlan||layout(score,minimumVerses),notes=plan.measures.flatMap(m=>m.notes),segments=[];
  for(let i=0;i<notes.length;){
   const first=notes[i];
   if(Number.isFinite(first.n.gridTimeStart)&&Number.isFinite(first.n.gridTimeEnd)){const following=notes[i+1],m=plan.measures[first.mi];segments.push({id:first.n.id,start:first.n.gridTimeStart,end:first.n.gridTimeEnd,x:first.x-14,toX:following?.row===first.row?following.x-14:m.x+m.width-7,y:first.y-45,bottom:first.y+40+plan.verseCount*26,row:first.row});i++;continue;}

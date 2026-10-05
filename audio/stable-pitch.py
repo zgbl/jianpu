@@ -6,7 +6,7 @@ is deliberately exposed for calibration; these defaults are not measured accurac
 import numpy as np
 from importlib import import_module
 
-VERSION = 'vocal-notes-v3.2'
+VERSION = 'vocal-notes-v3.3'
 DEFAULTS = dict(shortCoreWindow=.048, coreWindow=.080, vibratoWindow=.208, coreSpread=.32,
                 coreDrift=.22, coreTolerance=.45, minCore=.048,
                 seedVoicing=.65, continuationVoicing=.35, missingGap=.096,
@@ -254,7 +254,7 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
             for event in candidates:
                 core_seconds = sum(max(0, min(event['end'], c['end'])-max(event['start'], c['start']))
                                    for c in recovery_diag['cores'])
-                if event['end']-event['start'] < cfg['recoveryMinDuration'] or core_seconds < cfg['recoveryMinCore']:
+                if event['end']-event['start']+1e-8 < cfg['recoveryMinDuration'] or core_seconds+1e-8 < cfg['recoveryMinCore']:
                     continue
                 # Retain a proposed pitch, not a confident transcription.
                 event.update(pitchStatus='uncertain', confidence=0,
@@ -265,11 +265,47 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
                 labels[begin:finish] = event['midi']
             all_cores.extend(c for c in recovery_diag['cores'] if any(
                 c['start'] < e['end'] and c['end'] > e['start'] for e in recovered))
-    events = sorted(events+recovered, key=lambda e: e['start'])
+    # A recovery lane fills missing evidence, not necessarily a new attack.
+    # Reattach a weak tail to its strict event only at a touching same-pitch
+    # boundary, with no acoustic reattack there. Do not merge strict repeats.
+    combined = sorted(events+recovered, key=lambda e: e['start'])
+    events = []
+    attached = 0
+    for event in combined:
+        previous = events[-1] if events else None
+        joins_tail = (previous is not None and event.get('recoveryReason') and
+                      not previous.get('recoveryReason') and
+                      abs(event['start']-previous['end']) <= step/2 and
+                      event['midi'] == previous['midi'] and
+                      abs(event['pitchCenterMidi']-previous['pitchCenterMidi']) <= .3)
+        reattack = False
+        if joins_tail:
+            boundary = int(round(event['start']/step))
+            for k in onsets:
+                if abs(k-boundary) > 2:
+                    continue
+                before = energy[max(0,k-round(.09/step)):k]
+                after = energy[k:min(len(energy),k+round(.08/step))]
+                if len(before) and len(after) and np.min(before) < cfg['repeatDip']*np.max(after):
+                    reattack = True
+                    break
+        if joins_tail and not reattack:
+            previous.setdefault('recoveredContinuations', []).append(dict(
+                start=event['start'], end=event['end'],
+                reason=event['recoveryReason'], voicingProbability=event['voicingProbability']))
+            previous['end'] = previous['performanceEnd'] = event['end']
+            previous['evidenceFrameRange'][1] = event['evidenceFrameRange'][1]
+            previous['reviewRequired'] = True
+            previous['reviewReason'] = 'low-voicing-continuation'
+            previous['ornaments'].extend(event['ornaments'])
+            attached += 1
+        else:
+            events.append(event)
     return events, labels, dict(version=VERSION,config=cfg,cores=all_cores,filledDropouts=filled,
                                uncertainEvents=sum(e['pitchStatus']=='uncertain' for e in events),
                                confidenceMeaning='voicingProbability is not pitch correctness probability',
                                recoveredLowConfidenceEvents=len(recovered),
+                               attachedLowConfidenceContinuations=attached,
                                energyThreshold=max(.0008, float(np.max(energy))*.025) if energy is not None else None,
                                secondaryDetector=None,tuningCents=tuning_diagnostics['cents'],
                                tuning=tuning_diagnostics,

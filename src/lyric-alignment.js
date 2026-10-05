@@ -106,10 +106,17 @@ export function completeAcousticCharacters(alignment){
  const rates=anchors.slice(1).map((a,k)=>(a.c.start-anchors[k].c.start)/(a.i-anchors[k].i)).filter(v=>v>0&&v<2).sort((a,b)=>a-b);
  const rate=rates.length?rates[Math.floor(rates.length/2)]:.3;
  for(let i=0;i<chars.length;i++){
-  const c=chars[i];if(Number.isFinite(c.start)&&Number.isFinite(c.end)&&c.end>c.start)continue;
-  const left=anchors.filter(a=>a.i<i).at(-1),right=anchors.find(a=>a.i>i);
-  const start=left&&right?left.c.start+(right.c.start-left.c.start)*(i-left.i)/(right.i-left.i):left?left.c.start+rate*(i-left.i):right?Math.max(0,right.c.start-rate*(right.i-i)):i*rate;
-  chars[i]={...c,observedStart:c.start,observedEnd:c.end,start,end:start+rate,status:'estimated',evidence:'anchor-interpolation'};
+  const c=chars[i];if(!c.timingUnresolved&&Number.isFinite(c.start)&&Number.isFinite(c.end)&&c.end>c.start)continue;
+  const left=anchors.filter(a=>a.i<i).at(-1),right=anchors.find(a=>a.i>i&&(!left||a.c.start>(left.c.end??left.c.start)+.001));
+  let start,length=rate;
+  if(left&&right){
+   const high=right.c.start,low=left.c.end??left.c.start+(high-left.c.start)/(right.i-left.i),step=(high-low)/(right.i-left.i-1);
+   start=low+step*(i-left.i-1);length=Math.min(rate,step*.8);
+  }else if(left){start=(left.c.end??left.c.start)+rate*(i-left.i-1);}
+  else if(right){length=Math.min(rate,right.c.start/(right.i||1));start=Math.max(0,right.c.start-length*(right.i-i));}
+  else start=i*rate;
+  chars[i]={...c,observedStart:c.observedStart??c.start,observedEnd:c.observedEnd??c.end,start,end:start+length,status:'estimated',timingEstimated:true,evidence:'anchor-interpolation'};
+  delete chars[i].timingUnresolved;
  }
  return chars;
 }
@@ -123,6 +130,8 @@ export function applyAcousticLyrics(score,alignment,{verse=1}={}){
  const prior=new Map((score.lyricAlignment?.characters||[]).map(c=>[c.id,c]));
  for(const c of characters){const old=prior.get(c.id);if(old?.text===c.text&&old.placement?.manual)c.placement=structuredClone(old.placement);}
  next.lyrics=(next.lyrics||[]).filter(l=>l.verse!==verse);
- next.lyricAlignment={...structuredClone(alignment),characters,verse,pending:[],displayMode:'characters',legacyLyrics:alignment.legacyLyrics||structuredClone((score.lyrics||[]).filter(l=>l.verse===verse))};
- return {score:validate(next),count:characters.length,unplaced:[],warnings:[`${characters.filter(c=>c.status==='estimated').length} 字按锚点估算，棕色标记；可逐字拖动核对。`]};
+ const lines=(alignment.lines||[]).map(line=>{const cs=characters.filter(c=>c.lineId===line.id);return cs.length&&cs.every(c=>Number.isFinite(c.start)&&Number.isFinite(c.end))?{...line,timingUnresolved:false,timingEstimated:cs.some(c=>c.timingEstimated),status:cs.some(c=>c.timingEstimated)?'estimated':line.status}:line;});
+ next.lyricAlignment={...structuredClone(alignment),lines,characters,verse,pending:[],displayMode:'characters',legacyLyrics:alignment.legacyLyrics||structuredClone((score.lyrics||[]).filter(l=>l.verse===verse))};
+ const unresolved=characters.filter(c=>c.timingUnresolved);
+ return {score:validate(next),count:characters.length-unresolved.length,unplaced:unresolved.map(c=>c.text),warnings:[...(alignment.warnings||[]),...(unresolved.length?[`${unresolved.length} 字整句缺少可靠时间，保留待定位，未硬排入谱面。`]:[]),`${characters.filter(c=>c.status==='estimated').length} 字按锚点估算，棕色标记；可逐字拖动核对。`]};
 }

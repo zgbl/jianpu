@@ -1,6 +1,6 @@
 import {displayChordLabel,guitarCaption} from './guitar-notation.js';
 import {chordAtMeasure} from './chords.js';
-import {audioScoreTimeline} from './audio-score-cursor.js';
+import {guitarDiagram} from './guitar-fingering.js';
 import {lyricWidth} from './lyrics.js';import {layout,beamSegments} from './layout.js';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 export function render(score,selected,active,exporting=false,range=[],entry=null,lyricVerse=0){
@@ -21,7 +21,7 @@ export function render(score,selected,active,exporting=false,range=[],entry=null
   const tuplets=new Map();for(const p of notes)if(p.n.tuplet){const group=tuplets.get(p.n.tuplet.id)||[];group.push(p);tuplets.set(p.n.tuplet.id,group);}
   for(const group of tuplets.values()){const a=group[0].x-9,b=group.at(-1).x+9,c=(a+b)/2,ty=y-44;shapes+=`<g class="tuplet-bracket"><path d="M ${a} ${ty+5} V ${ty} H ${c-9} M ${c+9} ${ty} H ${b} V ${ty+5}"/><text x="${c}" y="${ty+4}" text-anchor="middle" font-size="13" fill="#252d32">3</text></g>`;}
   const chords=(score.chords||[]).filter(c=>c.measureId===m.id),begin=notes.find(n=>Number.isFinite(n.n.gridTimeStart))?.n.gridTimeStart,finish=notes.at(-1)?.n.gridTimeEnd;
-  for(const chord of chords){const fraction=Number.isFinite(begin)&&finish>begin&&Number.isFinite(chord.start)?Math.max(0,Math.min(.75,(chord.start-begin)/(finish-begin))):0;shapes+=`<text x="${(notes[0]?.x??x+18)+fraction*(width-32)}" y="${y-60}" font-size="17" font-weight="600" fill="#416d63">${esc(displayChordLabel(score,chord.label))}</text>`;}
+  for(const chord of chords){const fraction=Number.isFinite(chord.startTick)?Math.max(0,Math.min(.75,chord.startTick/Math.max(score.meter[0]*64/score.meter[1],notes.reduce((sum,n)=>sum+n.duration,0)))):Number.isFinite(begin)&&finish>begin&&Number.isFinite(chord.start)?Math.max(0,Math.min(.75,(chord.start-begin)/(finish-begin))):0;const chordX=(notes[0]?.x??x+18)+fraction*(width-32);if(score.showGuitarDiagrams)shapes+=guitarDiagram(displayChordLabel(score,chord.label),chordX-8,y-144,{capo:score.guitarNotation?.mode==='fingering'?score.guitarNotation.capo:0});shapes+=`<text x="${chordX}" y="${y-60}" font-size="17" font-weight="600" fill="#416d63">${esc(displayChordLabel(score,chord.label))}</text>`;}
   const bar=x+width-5;
   if(m.repeatStart){shapes+=`<line class="heavy" x1="${x+4}" x2="${x+4}" y1="${y-24}" y2="${y+20}"/><line x1="${x+10}" x2="${x+10}" y1="${y-24}" y2="${y+20}"/><circle cx="${x+18}" cy="${y-9}" r="2.5"/><circle cx="${x+18}" cy="${y+4}" r="2.5"/>`;}
   shapes+=`<line x1="${bar}" x2="${bar}" y1="${y-24}" y2="${y+20}"/>`;
@@ -40,15 +40,10 @@ export function render(score,selected,active,exporting=false,range=[],entry=null
   if(a.row===b.row)shapes+=curve(a.x,b.x,a.y-offset);else{shapes+=curve(a.x,plan.rowEnds[a.row],a.y-offset,true);for(let r=a.row+1;r<b.row;r++)shapes+=curve(38,plan.rowEnds[r],plan.baseline+r*plan.rowGap-offset,true);shapes+=curve(38,b.x,b.y-offset,true);}
  }
  for(const ending of score.endings||[]){const a=plan.measures.find(m=>m.m.id===ending.fromMeasure),b=plan.measures.find(m=>m.m.id===ending.toMeasure);if(!a||!b)continue;for(let row=a.row;row<=b.row;row++){const x1=row===a.row?a.x:38,x2=row===b.row?b.x+b.width-5:plan.rowEnds[row],y=plan.baseline+row*plan.rowGap-78;shapes+=`<path class="ending" d="M ${x1} ${y+12} V ${y} H ${x2}${row===b.row?' v 12':''}"/><text class="measure" x="${x1+5}" y="${y-4}">${ending.number}${row!==a.row?'（续）':''}.</text>`;}}
- const aligned=score.lyricAlignment?.displayMode==='characters'?score.lyricAlignment.characters:score.lyricAlignment?.pending||[];
- let extraHeight=0;const segments=aligned.length?audioScoreTimeline(score):[];
- for(const c of aligned){
-  if(!Number.isFinite(c.start)||!segments.length)continue;
-  const seg=segments.find(s=>s.start<=c.start&&s.end>c.start)||(c.start<segments[0].start?segments[0]:segments.at(-1));
-  const p=c.placement?plan.positions.get(c.placement.noteId):null;
-  const x=p?p.x+(c.placement.offsetX||0):seg.x+14+(seg.toX-seg.x)*Math.max(0,Math.min(1,(c.start-seg.start)/(seg.end-seg.start||1)));
-  const y=(p?p.y+62:seg.y+107)+((score.lyricAlignment.verse||1)-1)*26;
-  shapes+=`<g ${exporting?'':`data-timed-lyric="${esc(c.id)}" data-verse="${score.lyricAlignment.verse||1}" class="draggable-lyric" role="button" tabindex="0" aria-label="选择或拖动歌词 ${esc(c.text)}" style="cursor:grab;touch-action:none"`}><title>${c.status==='estimated'?'锚点估算':'声学定位'} ${c.start.toFixed(2)} 秒</title><rect x="${x-10}" y="${y-21}" width="20" height="28" fill="transparent" pointer-events="all"/><text x="${x}" y="${y}" text-anchor="middle" font-size="18" fill="${c.status==='estimated'?'#9b641e':'#303b43'}">${esc(c.text)}</text></g>`;
+ let extraHeight=0;
+ for(const {c,x,y,verse,collision} of plan.timedLyrics){
+  const uncertain=c.status!=='acoustic';
+  shapes+=`<g ${exporting?'':`data-timed-lyric="${esc(c.id)}" data-verse="${verse}" class="draggable-lyric" role="button" tabindex="0" aria-label="选择或拖动歌词 ${esc(c.text)}" style="cursor:grab;touch-action:none"`}><title>${uncertain?'时间待核对':'声学定位'} ${c.start.toFixed(2)} 秒${collision?'；位置冲突，已分行显示':''}</title><rect x="${x-10}" y="${y-21}" width="20" height="28" fill="transparent" pointer-events="all"/><text x="${x}" y="${y}" text-anchor="middle" font-size="18" fill="${uncertain?'#9b641e':'#303b43'}">${esc(c.text)}</text></g>`;
  }
  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${plan.width} ${plan.height+extraHeight}" style="font-family:Arial,sans-serif;color:#252d32"><style>.digit{font-size:24px;font-weight:600;text-anchor:middle;fill:#252d32}.lyric{font-family:"PingFang SC","Microsoft YaHei",sans-serif;font-size:18px;text-anchor:middle;fill:#303b43}.melisma{stroke-width:1}.lyric-group{cursor:grab;user-select:none}.draggable-lyric{user-select:none}.draggable-lyric text{pointer-events:none}.selected-lyric rect{fill:#d7e9e0;stroke:#416d63;stroke-width:1.5}.lyric-drag-ghost{font-family:Arial,sans-serif}.grace{font-size:15px;font-weight:600;text-anchor:middle;fill:#252d32}.measure{font-size:12px;fill:#62728a}line{stroke:#252d32;stroke-width:1.7}line.heavy{stroke-width:4}circle{fill:#252d32}path{fill:none;stroke:#252d32;stroke-width:1.3}g:focus{outline:none}g:focus rect{stroke:#416d63}.beam{pointer-events:none}</style><text x="38" y="28" font-size="20">${esc(score.title)}</text><text x="38" y="51" font-size="14">1 = ${esc(score.key)}　${score.meter.join('/')}${score.performer?`　${esc(score.performer)} 演唱`:""}</text>${guitarCaption(score)?`<text x="38" y="73" font-size="13" fill="#416d63">${esc(guitarCaption(score))}</text>`:""}${shapes}</svg>`;
 }

@@ -1,7 +1,8 @@
 import {melodyTimeline} from './melody-timeline.js';
-import {chordWindows,applyChords} from './chords.js';
+import {chordWindows} from './chords.js';
+import {createChordWorkflow} from './chord-workflow.js';
 import {importedAudioMode,importedAudioDuration,sourceTrackLabel} from './audio-input-mode.js';
-import {createIntroWorkflow,mergeIntroNotes} from './intro-workflow.js';
+import {createIntroWorkflow,mergeIntroNotes,prependZeroIntro} from './intro-workflow.js';
 import {createAudioCapture} from './audio-capture.js';
 import {inputAudioError} from './capture-audio.js';
 import {createKeyWorkflow} from './key-workflow.js';
@@ -86,20 +87,17 @@ function updateScoreTransport(){
  $('scoreTransportToggle').textContent=!player.paused&&!player.ended?'■ 暂停试听':`▶ 播放${player===$('originalPlayer')?'原曲':'人声'}`;
  $('scoreTransportTime').textContent=`${durationText(relative)} / ${durationText(result?.duration||0)}`;
 }
-let chordBusy=false;
-async function analyzeChords(){
- if(chordBusy||!score||!job?.id){status('请先打开有音频识别结果的工程',true);return;}
- const runId=job.id,projectId=projectBridge.context()?.project.id;chordBusy=true;
- try{
-  const res=await fetch('/api/lyrics/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'chords',projectId,runId,windows:chordWindows(score,{halves:true})})});const task=await res.json();if(!res.ok)throw Error(task.error);
-  while(job?.id===runId&&projectBridge.context()?.project.id===projectId){
-   const response=await fetch(`/api/lyrics/jobs/${task.id}`),state=await response.json();if(!response.ok)throw Error(state.error);status(`和弦分析 ${Math.round(state.progress*100)}% · ${state.message}`);
-   if(['error','cancelled'].includes(state.status))throw Error(state.message);
-   if(state.status==='done'){const response=await fetch(`/api/lyrics/jobs/${task.id}/result`),analysis=await response.json();if(!response.ok)throw Error(analysis.error);score=applyChords(score,analysis);scoreEdited=true;renderCurrentScore();publishProject();status(`已标记 ${score.chords.length} 个小节和弦候选；点小节后用“改和弦”修正。`);break;}
-   await new Promise(r=>setTimeout(r,800));
-  }
- }catch(e){status(e.message,true);}finally{chordBusy=false;}
-}
+const chordWorkflow=createChordWorkflow({getScore:()=>score,getDuration:()=>result?.duration,getGranularity:()=>$('scoreEditToolbar').querySelector('[data-chord-granularity]')?.value||'half',getColor:()=>+$('scoreEditToolbar').querySelector('[data-chord-color]')?.value||0,getContext:()=>({runId:job?.id,projectId:projectBridge.context()?.project.id}),applyScore:(next,text)=>scoreEditor.applyScore(next,text),feedback:(text,{error=false,busy=false,progress=null}={})=>{
+ const toolbar=$('scoreEditToolbar'),local=toolbar.querySelector('[data-chord-status]'),bar=toolbar.querySelector('[data-chord-progress]'),cancel=toolbar.querySelector('[data-chord-cancel]');
+ if(local){local.hidden=false;local.textContent=text;local.classList.toggle('error',error);}
+ if(bar){bar.hidden=!busy;if(progress===null)bar.removeAttribute('value');else bar.value=progress;}
+ if(cancel){cancel.hidden=!busy;cancel.onclick=()=>chordWorkflow.cancel();}
+ const button=toolbar.querySelector('[data-edit-action="chords"]');if(button){button.disabled=busy;button.textContent=busy?'正在处理和弦…':'按当前乐谱配和弦';}
+ const audioButton=toolbar.querySelector('[data-edit-action="chords-audio"]');if(audioButton)audioButton.disabled=busy;
+ const confirm=toolbar.querySelector('[data-edit-action="guitar-apply"]');if(confirm)confirm.disabled=busy;
+ status(text,error);
+}});
+function analyzeChords(mode='score'){return chordWorkflow.run(mode);}
 function renderCurrentScore(){if(!score)return;scoreEditor.draw();$('recognizedScore').hidden=false;$('empty').hidden=true;$('summary').textContent=`${score.measures.length} 小节 · 1=${score.key} · ${score.tempo??score.transcription?.bpm??$('bpm').value} BPM · 在谱面直接编辑`;controls();}
 function renderManualBars(){
  const list=$('manualBarList');list.replaceChildren();
@@ -271,7 +269,7 @@ refreshRhythmHint();checkHealth();
 
 lyricWorkflow=createLyricWorkflow({bridge:projectBridge,getJob:()=>job,getResult:()=>result,getScore:()=>score,getBusy:()=>busy,replaceScore:next=>{score=next;scoreEdited=true;renderCurrentScore();},redraw:()=>{if(score){score=lyricWorkflow.decorate(score);scoreEdited=true;renderCurrentScore();}else drawScore();},publish:publishProject,controls});
 function showProgress(state){$('recognitionProgress').hidden=false;const percent=Math.round(Math.max(0,Math.min(1,state.progress||0))*100);$('recognitionBar').value=percent;$('progressPercent').textContent=percent+'%';$('progressElapsed').textContent=state.status==='done'&&!state.startedAt?'已恢复完成结果':'已用时 '+Math.max(0,Math.floor((Date.now()-(state.startedAt||Date.now()))/1000))+' 秒';$('progressDetail').textContent=state.status==='done'?'识别完成':['error','cancelled'].includes(state.status)?'任务已停止，可重新尝试':'阶段进度估计，模型计算期间百分比可能停留；任务仍在运行';}
-introWorkflow=createIntroWorkflow({getResult:()=>result,getScore:()=>score,getJob:()=>job,getBusy:()=>busy||lyricWorkflow?.busy(),bridge:projectBridge,player:melodyPlayer,beforePreview:()=>{stems.pause();$('originalPlayer').pause();$('vocalPlayer').pause();},apply:candidate=>{const prior=result;result=mergeIntroNotes(result,candidate);if(!drawScore({regenerate:true})){result=prior;throw Error("前奏并谱失败，原谱已保留");}},publish:publishProject});
+introWorkflow=createIntroWorkflow({getResult:()=>result,getScore:()=>score,getJob:()=>job,getBusy:()=>busy||lyricWorkflow?.busy(),bridge:projectBridge,player:melodyPlayer,beforePreview:()=>{stems.pause();$('originalPlayer').pause();$('vocalPlayer').pause();},applyZeros:range=>{const next=prependZeroIntro(score,range);if(!scoreEditor.applyScore(next,'已补全0前奏小节（可撤销）'))throw Error('补前奏失败，原谱已保留');scoreEdited=true;pendingArchive=true;},apply:candidate=>{const prior=result;result=mergeIntroNotes(result,candidate);if(!drawScore({regenerate:true})){result=prior;throw Error("前奏并谱失败，原谱已保留");}},publish:publishProject});
 function projectSnapshot(){const transcribe={unified:true,scoreEdited,inlineEditor:scoreEditor.snapshot(),manualBars,manualRhythmEdits:structuredClone(manualRhythmEdits),manualCalibration:result?.manualCalibration||null};for(const id of ['sourceMode','separationModel','pitchAlgorithm','pyinFrameLength','clipStart','clipDuration','bpm','beatUnit','key','meter','firstBeat','rhythmMode','barAnchor'])transcribe[id]=$(id).value;transcribe.originalTime=$('originalPlayer').currentTime||0;transcribe.vocalTime=$('vocalPlayer').currentTime||0;transcribe.runId=job?.id||null;transcribe.stemTimes=stems.times();if(result?.rhythm)transcribe.rhythm=result.rhythm;Object.assign(transcribe,lyricWorkflow?.snapshot(),keyWorkflow?.snapshot(),introWorkflow?.snapshot());if(result?.intro)transcribe.appliedIntro=result.intro;return {transcribe,keyAnalysis:keyWorkflow?.analysisSnapshot(),...(score?{score:structuredClone(score),scoreBasedOn:scoreOriginRunId,archiveScore:pendingArchive}:{}),...(score&&result&&job?.id&&scoreOriginRunId===job.id?{preview:{runId:job.id,score:structuredClone(score),notation:{manualBars,manualRhythmEdits:structuredClone(manualRhythmEdits),manualCalibration:result.manualCalibration||null,bpm:quarterBpm(),heardBpm:+$('bpm').value,beatUnit:+$('beatUnit').value,key:$('key').value,meter:+$('meter').value,firstBeat:+$('firstBeat').value,rhythmMode:$('rhythmMode').value,barAnchor:+$('barAnchor').value,...(result.rhythm?{rhythm:result.rhythm}:{})}}}:{})};}
 function publishProject(){if(projectRestoring||!projectBridge.context())return;clearTimeout(projectChangeTimer);projectBridge.change(projectSnapshot());}
 window.addEventListener('project-snapshot-request',async event=>{if(projectRestoring&&busy){if(scoreEditor.flush())event.detail.reply(projectSnapshot());else event.detail.reply(null,'请先完成谱面歌词输入');return;}const deadline=Date.now()+8000;while(projectRestoring&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,25));if(projectRestoring)event.detail.reply(null,'工程正在恢复，请稍后再保存');else if(scoreEditor.flush())event.detail.reply(projectSnapshot());else event.detail.reply(null,'请先完成谱面歌词输入');});

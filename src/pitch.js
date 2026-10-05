@@ -8,6 +8,19 @@ export function keyPc(key){const m=/^([A-G])([#b]?)$/.exec(String(key).replaceAl
 export const keyName=pc=>KEY_NAMES[mod12(pc)];
 export const displayKey=key=>String(key).replace('#','♯').replace('b','♭');
 export function referenceDo(score){return score.keyMap?.referenceDoMidi??60+keyPc(score.key);}
+// Move notation dots, not sounding pitches. Lowering the reference raises dots.
+export function shiftOctaveNotation(score,direction){
+ if(![-1,1].includes(direction))throw Error('八度标记只能上移或下移一组');
+ const next=structuredClone(score);
+ for(const m of next.measures)for(const n of m.notes)for(const pitched of [n,n.grace].filter(Boolean)){
+  if(!pitched.degree)continue;
+  const octave=(pitched.octave||0)+direction;
+  if(octave< -2||octave>2)throw Error('移动后超出两组八度标记范围，未修改乐谱');
+  pitched.octave=octave;
+ }
+ next.keyMap={...(score.keyMap||legacyKeyMap(score)),referenceDoMidi:referenceDo(score)-12*direction,revision:crypto.randomUUID()};
+ return next;
+}
 export function noteMidi(n,score){return referenceDo(score)+SCALE[n.degree-1]+12*(n.octave||0)+(n.accidental||0);}
 export function pitchToDegree(midi,key,reference=60+keyPc(key)){
  if(!Number.isInteger(midi)||!Number.isInteger(reference))throw Error('音高必须是整数 MIDI');

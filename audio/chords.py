@@ -4,13 +4,34 @@ from pathlib import Path
 import numpy as np
 from key_analysis import mono_audio,progress
 NAMES=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']
+def mix_tracks(tracks):
+ if not tracks: raise ValueError('没有可用伴奏声部')
+ # Stems share their clip origin. Pad shorter tracks, never concatenate them.
+ mixed=np.zeros(max(len(y) for y in tracks),dtype=np.float32)
+ for y in tracks: mixed[:len(y)]+=y
+ return mixed
+
+def accompaniment(input_path):
+ folder=Path(input_path).parent
+ paths=[folder/(name+'.wav') for name in ['piano','guitar','other'] if (folder/(name+'.wav')).is_file()]
+ if paths:
+  progress(.05,'合并已有伴奏声部：'+ '、'.join(p.stem for p in paths))
+  y=mix_tracks([mono_audio(path)[0] for path in paths])
+  if np.max(np.abs(y),initial=0)>1e-5:
+   return y,'+'.join(p.stem for p in paths)
+ fallback=folder/'clip.wav'
+ if not fallback.is_file(): fallback=Path(input_path)
+ progress(.08,'读取原曲谐波：'+fallback.stem)
+ return mono_audio(fallback)[0],fallback.stem
+
 def analyze(input_path,windows):
  import librosa
  folder=Path(input_path).parent;sr=11025;hop=512
- path=next((folder/(n+'.wav') for n in ['guitar','other','clip'] if (folder/(n+'.wav')).exists()),Path(input_path))
- progress(.05,'读取已有伴奏声部：'+path.stem)
- y,_=mono_audio(path);h=librosa.effects.harmonic(y,hop_length=hop)
+ y,source=accompaniment(input_path)
+ progress(.12,'提取伴奏谐波（钢琴、吉他与其他声部共同参与）')
+ h=librosa.effects.harmonic(y,hop_length=hop)
  tuning=librosa.estimate_tuning(y=h[:sr*60],sr=sr,n_fft=4096)
+ progress(.2,'计算伴奏音类频谱')
  c=librosa.feature.chroma_cqt(y=h,sr=sr,hop_length=hop,tuning=tuning*3,bins_per_octave=36,n_octaves=6,fmin=librosa.note_to_hz('C2'))
  bass=None
  if (folder/'bass.wav').exists():
@@ -41,7 +62,7 @@ def analyze(input_path,windows):
  for i,(w,k) in enumerate(zip(windows,ids)):
   alternatives=sorted(range(len(labels)),key=lambda j:e[i,j],reverse=True)[:60]
   out.append({**w,'label':labels[k] if energies[i]>.002 else '','score':round(float(e[i,k]),3),'candidates':[{'label':labels[j],'score':round(float(e[i,j]),3)} for j in alternatives],'source':'automatic'})
- return {'version':2,'windowsPerMeasure':2,'method':'harmonic-head-bass-cqt-v2','audioSource':path.stem,'timeBase':'clip-seconds','chords':out,'warning':'和弦为伴奏谐波候选，复杂和弦、转位与编配变化需试听核对；字母为实际音高，未转换Capo指型。'}
+ return {'version':2,'windowsPerMeasure':2,'method':'accompaniment-head-bass-cqt-v3','audioSource':source,'timeBase':'clip-seconds','chords':out,'warning':'和弦为伴奏谐波候选，复杂和弦、转位与编配变化需试听核对；字母为实际音高，未转换Capo指型。'}
 if __name__=='__main__':
  p=argparse.ArgumentParser();p.add_argument('--input',required=True);p.add_argument('--output',required=True);p.add_argument('--windows',required=True);a=p.parse_args()
  w=json.loads(Path(a.windows).read_text());Path(a.output).write_text(json.dumps(analyze(a.input,w),ensure_ascii=False));progress(1,'和弦分析完成')

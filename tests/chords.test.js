@@ -4,3 +4,15 @@ test('和弦按小节时间绑定，保存重开保留，不修改旋律歌词',
 import {configureHarmony} from '../src/chord-harmony.js';import {relabelScore,noteMidi} from '../src/pitch.js';
 test('Do 校准重评自动和弦，实际音高与人工和弦不变',()=>{const s=transcriptionToScore({estimatedBpm:120,notes:[{start:0,end:2,midi:60,confidence:1}]},{key:'C'});const w=chordWindows(s)[0],a={chords:[{...w,label:'C',score:.7,candidates:[{label:'C',score:.7},{label:'D',score:.69}]}]};const r=applyChords(s,a),next=relabelScore(r,'D');assert.equal(next.chordConfiguration.do,'D');assert.equal(next.chords[0].label,'D');assert.equal(noteMidi(next.measures[0].notes[0],next),60);r.chords[0].source='manual';assert.equal(relabelScore(r,'D').chords[0].label,'C');});
 test('半小节候选相同则合并，每小节至多两个和弦',()=>{const s=transcriptionToScore({estimatedBpm:120,notes:[{start:0,end:2,midi:60,confidence:1}]},{key:'C'});const w=chordWindows(s,{halves:true});assert.equal(w.length,2);const c=configureHarmony(s,{windowsPerMeasure:2,chords:w.map(x=>({...x,label:'C',score:1,candidates:[{label:'C',score:1}]}))});assert.equal(c.chords.length,1);assert.equal(c.chords[0].end,2);});
+test('起点早于录音的首小节裁到零秒，再划分半小节，不修改原时间',()=>{
+ const s=transcriptionToScore({estimatedBpm:120,notes:[{start:0,end:2,midi:60,confidence:1}]},{key:'C'}),m=s.measures[0];
+ m.notes[0].gridTimeStart=-2.236;m.notes[0].gridTimeEnd=.74;
+ const before=structuredClone(s),w=chordWindows(s,{halves:true,duration:2});
+ assert.deepEqual(w,[{measureId:m.id,start:0,end:.37},{measureId:m.id,start:.37,end:.74}]);assert.deepEqual(s,before);
+});
+test('完全在录音外的小节不参与分析，跨过结尾的小节裁到音频时长',()=>{
+ const s=transcriptionToScore({estimatedBpm:120,notes:[{start:0,end:2,midi:60,confidence:1},{start:2,end:4,midi:62,confidence:1}]},{key:'C'});
+ for(const n of s.measures[0].notes){n.gridTimeStart=-2;n.gridTimeEnd=-1;}
+ for(const n of s.measures[1].notes){n.gridTimeStart=2;n.gridTimeEnd=4;}
+ const w=chordWindows(s,{halves:true,duration:3});assert.equal(w.length,2);assert.deepEqual(w.map(x=>[x.start,x.end]),[[2,2.5],[2.5,3]]);
+});

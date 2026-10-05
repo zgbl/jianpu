@@ -81,4 +81,21 @@ class StablePitch(unittest.TestCase):
         events,_,_=self.decode(p,energy=np.ones(len(p)),probability=prob)
         self.assertTrue(any(not e.get('recoveryReason') and e['midi']==62 for e in events))
         self.assertTrue(all(a['end']<=b['start'] for a,b in zip(events,events[1:])))
+    def test_weak_same_pitch_tail_is_continuation_not_new_note(self):
+        pitches=np.r_[[64]*20,[64.1]*10,[62]*20]
+        probability=np.r_[[.9]*20,[.03]*10,[.9]*20]
+        events,_,d=self.decode(pitches,energy=np.ones(len(pitches)),probability=probability)
+        self.assertEqual([e['midi'] for e in events],[64,62])
+        self.assertAlmostEqual(events[0]['end'],.48)
+        self.assertTrue(events[0]['reviewRequired'])
+        self.assertEqual(events[0]['reviewReason'],'low-voicing-continuation')
+        self.assertEqual(d['attachedLowConfidenceContinuations'],1)
+        self.assertEqual(events[0]['coreEnd'],.32)
+    def test_weak_same_pitch_reattack_is_not_attached(self):
+        pitches=np.r_[[64]*20,[64]*14,[62]*20]
+        probability=np.r_[[.9]*20,[.03]*14,[.9]*20]
+        energy=np.ones(len(pitches));energy[17:20]=.2
+        events,_,d=self.decode(pitches,energy=energy,probability=probability,onsets=[.32])
+        self.assertEqual([e['midi'] for e in events],[64,64,62])
+        self.assertEqual(d['attachedLowConfidenceContinuations'],0)
 if __name__=='__main__':unittest.main()

@@ -51,7 +51,7 @@ export function transcriptionToScore(result,{title='识别旋律',bpm=result.est
   const sustain=next&&!e.manual&&!next.manual&&gap>=0&&gap<=Math.min(.3,beatSeconds*.5);
   const end=Math.max(start+1,Math.min(sustain?nextStart:observedEnd,nextStart)),duration=end-start;
   if(sustain&&nextStart>observedEnd)score.transcription.bridgedGaps=(score.transcription.bridgedGaps||0)+1;
-  const before=score.measures.flatMap(m=>m.notes).length,eventKey=e.sourceEventId||`${Math.round(e.start*1000)}-${e.midi}`;append(duration,e.midi,e.confidence,e.start,e.end,eventKey);for(const n of score.measures.flatMap(m=>m.notes).slice(before)){n.centsDeviation=e.centsDeviation;n.pitchStatus=e.pitchStatus;if(e.pitchStatus==='uncertain'||e.reviewRequired){n.reviewRequired=true;n.reviewReason=e.recoveryReason||'uncertain-pitch';}if(e.recoveryReason)n.recoveryReason=e.recoveryReason;}if(e.confidence<.8||e.centsDeviation>35)uncertain++;
+  const before=score.measures.flatMap(m=>m.notes).length,eventKey=e.sourceEventId||`${Math.round(e.start*1000)}-${e.midi}`;append(duration,e.midi,e.confidence,e.start,e.end,eventKey);for(const n of score.measures.flatMap(m=>m.notes).slice(before)){n.centsDeviation=e.centsDeviation;n.pitchStatus=e.pitchStatus;if(e.pitchStatus==='uncertain'||e.reviewRequired){n.reviewRequired=true;n.reviewReason=e.reviewReason||e.recoveryReason||'uncertain-pitch';}if(e.recoveryReason)n.recoveryReason=e.recoveryReason;}if(e.confidence<.8||e.centsDeviation>35)uncertain++;
  }
  if(used<barUnits)append(barUnits-used,0,1,null,null,null,'bar-padding');score.measures.at(-1).final=true;
  score.transcription.unresolvedGaps=score.measures.flatMap(m=>m.notes).filter(n=>n.reviewReason==='unresolved-gap').length;

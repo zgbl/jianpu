@@ -1,9 +1,18 @@
 import {ticks} from './model.js';
 import {lyricWidth} from './lyrics.js';
+import {timedLyricLayout} from './timed-lyric-layout.js';
 export function layout(score,minimumVerses=0){
+ let plan=baseLayout(score,minimumVerses);
+ let timed=timedLyricLayout(score,plan);
+ if(timed.verseCount>plan.verseCount){plan=baseLayout(score,timed.verseCount);timed=timedLyricLayout(score,plan);}
+ plan.timedLyrics=timed.items;plan.lyricCollisions=timed.collisions;
+ plan.width=Math.max(plan.width,...timed.items.map(item=>item.x+48));
+ return plan;
+}
+function baseLayout(score,minimumVerses=0){
  const verseCount=Math.max(minimumVerses,score.lyricAlignment?.verse||0,...(score.lyrics||[]).map(l=>l.verse));
  const lyricWidths=new Map();for(const l of score.lyrics||[])lyricWidths.set(l.noteId,Math.max(lyricWidths.get(l.noteId)||0,lyricWidth(l.text)+16));
- const maxWidth=1120,left=38,right=38,rowGap=(score.chords?.length?180:156)+Math.max(0,verseCount-1)*26,baseline=score.endings?.length?144:score.chords?.length?148:128;
+ const maxWidth=1120,left=38,right=38,rowGap=(score.chords?.length?180:156)+(score.showGuitarDiagrams&&score.chords?.length?85:0)+Math.max(0,verseCount-1)*26,baseline=(score.endings?.length?144:score.chords?.length?148:128)+(score.showGuitarDiagrams&&score.chords?.length?85:0);
  const measures=[],positions=new Map();let row=0;
  const prepared=score.measures.map((m,mi)=>{
   let time=0;const notes=m.notes.map(n=>{
