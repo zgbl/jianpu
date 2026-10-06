@@ -6,14 +6,16 @@ is deliberately exposed for calibration; these defaults are not measured accurac
 import numpy as np
 from importlib import import_module
 
-VERSION = 'vocal-notes-v3.3'
+VERSION = 'vocal-notes-v3.6'
 DEFAULTS = dict(shortCoreWindow=.048, coreWindow=.080, vibratoWindow=.208, coreSpread=.32,
                 coreDrift=.22, coreTolerance=.45, minCore=.048,
                 seedVoicing=.65, continuationVoicing=.35, missingGap=.096,
                 mergePenalty=.7, repeatDip=.65, estimateTuning=True,
                 tuningMinFrames=60, tuningMinNotes=5, tuningMinConcentration=.65,
                 tuningMaxCents=35, recoverLowConfidence=True, recoveryVoicing=.01,
-                recoveryMinDuration=.16, recoveryMinCore=.12)
+                recoveryMinDuration=.16, recoveryMinCore=.12,
+                transitionMaxCore=.10, transitionMaxGap=.096,
+                transitionMaxStep=.45, onsetRecoveryLookback=.8)
 runs = import_module('pitch-segmentation').runs
 
 
@@ -24,6 +26,139 @@ def median(values, weights=None):
     order = np.argsort(values)
     weights = np.asarray(weights)[order]
     return float(values[order][np.searchsorted(np.cumsum(weights), weights.sum()/2)])
+
+
+def transition_cores(cores, raw, valid, step, cfg, onsets, energy):
+    """Keep short discrete notes; absorb brief plateaus inside smooth scoops.
+
+    A short duration alone is never sufficient. Require a longer destination,
+    continuous observed pitch, predominantly one-way motion, and no reattack
+    between the plateau and destination. No key/scale or MIDI rounding is used.
+    """
+    kept, removed = [], []
+    for i, core in enumerate(cores):
+        following = cores[i+1] if i+1 < len(cores) else None
+        if (following is None or (core['b']-core['a'])*step > cfg['transitionMaxCore']+1e-8
+                or (following['b']-following['a'])*step < .112-1e-8
+                or (following['a']-core['b'])*step > cfg['transitionMaxGap']+1e-8):
+            kept.append(core)
+            continue
+        path = raw[core['a']:following['a']+1]
+        good = valid[core['a']:following['a']+1]
+        direction = np.sign(following['center']-core['center'])
+        delta = np.diff(path)
+        smooth = (direction != 0 and .6 <= abs(following['center']-core['center']) <= 2.5
+                  and np.all(good) and np.all(np.isfinite(path))
+                  and np.max(np.abs(delta), initial=0) <= cfg['transitionMaxStep']
+                  and np.sum(np.maximum(0, -direction*delta)) <= .25
+                  and direction*(path[-1]-path[0]) >= .6)
+        reattack = False
+        if smooth and energy is not None:
+            for k in onsets:
+                if not core['b'] <= k <= following['a']:
+                    continue
+                before = energy[max(core['a'], k-round(.09/step)):k]
+                after = energy[k:min(following['b'], k+round(.08/step))]
+                if len(before) and len(after) and np.min(before) < cfg['repeatDip']*np.max(after):
+                    reattack = True
+                    break
+        if smooth and not reattack:
+            removed.append(dict(start=round(core['a']*step,4), end=round(core['b']*step,4),
+                                pitchCenterMidi=round(core['center'],4), reason='short-smooth-transition'))
+        else:
+            kept.append(core)
+    return kept, removed
+
+
+def absorb_noise_fragments(events, step, cfg, onsets, energy):
+    """Extend dominant performance ranges without contaminating their cores.
+
+    Only brief uncertain events lacking a well-centered stable pitch qualify.
+    A discrete short note, a new acoustic attack, silence, and a source-gated
+    boundary are not evidence of noise and are never absorbed by this pass.
+    """
+    events = sorted(events, key=lambda e:e['start'])
+    absorbed = []
+    for fragment in list(events):
+        if fragment['end']-fragment['start'] > .12+1e-8 or fragment['pitchStatus'] != 'uncertain':
+            continue
+        # An off-center but stable short note still has independent evidence.
+        if fragment['coreStart'] is not None:
+            continue
+        index = events.index(fragment)
+        neighbors = [(events[j], j) for j in (index-1,index+1) if 0 <= j < len(events)]
+        choices = []
+        for main, j in neighbors:
+            if main['pitchStatus'] != 'candidate' or main['coreStart'] is None or main['coreEnd']-main['coreStart'] < .16:
+                continue
+            left,right = (main,fragment) if j < index else (fragment,main)
+            gap = right['start']-left['end']
+            if gap < -step/2 or gap > step/2+1e-8 or energy is None:
+                continue
+            a=max(0,int(round((left['end']-.032)/step)))
+            b=min(len(energy),int(round((right['start']+.032)/step))+1)
+            floor=max(.0008,float(np.max(energy))*.025)
+            if b<=a or np.min(energy[a:b]) < floor:
+                continue
+            reattack=False
+            for k in onsets:
+                if not left['end']-.032 <= k*step <= right['start']+.032:
+                    continue
+                before=energy[max(0,k-round(.09/step)):k]
+                after=energy[k:min(len(energy),k+round(.08/step))]
+                if len(before) and len(after) and np.min(before) < cfg['repeatDip']*np.max(after):
+                    reattack=True
+                    break
+            if not reattack:
+                choices.append((abs(fragment['pitchCenterMidi']-main['pitchCenterMidi']),main))
+        if not choices:
+            continue
+        _,main=min(choices,key=lambda pair:pair[0])
+        record=dict(start=fragment['start'],end=fragment['end'],pitchCenterMidi=fragment['pitchCenterMidi'],
+                    reason='brief-coreless-noise',destinationMidi=main['midi'])
+        main.setdefault('absorbedFragments',[]).append(record)
+        main['start']=main['performanceStart']=min(main['start'],fragment['start'])
+        main['end']=main['performanceEnd']=max(main['end'],fragment['end'])
+        main['evidenceFrameRange']=[min(main['evidenceFrameRange'][0],fragment['evidenceFrameRange'][0]),
+                                    max(main['evidenceFrameRange'][1],fragment['evidenceFrameRange'][1])]
+        events.remove(fragment)
+        absorbed.append(record)
+    return events,absorbed
+
+
+def contextual_pitch_targets(events):
+    """A narrow alternative for uncertain, flat melodic peaks.
+
+    A peak near a rounding boundary followed by a distinct lower core must
+    not automatically collapse into a repeated integer note. This is a
+    contour-based proposal, not new acoustic evidence or a confident truth.
+    """
+    proposals=[]
+    for left,event,right in zip(events,events[1:],events[2:]):
+        center=event['pitchCenterMidi']
+        if (event['pitchStatus']!='uncertain' or event['coreStart'] is None
+                or event['coreEnd']-event['coreStart'] < .096-1e-8
+                or event.get('coreDispersionCents',100)>15
+                or event['voicingProbability']<.65
+                or left['pitchStatus']!='candidate' or right['pitchStatus']!='candidate'
+                or right['start']-event['end']>.3 or event['start']-left['end']>.15):
+            continue
+        offset=center-event['midi']
+        if not (.35<=offset<.5 and event['midi']==right['midi']
+                and center-left['pitchCenterMidi']>=1.5
+                and .28<=center-right['pitchCenterMidi']<=.8):
+            continue
+        original=event['midi'];event['midi']=original+1
+        event['acousticNearestMidi']=original
+        event['pitchAlternatives']=[original,original+1]
+        event['targetReason']='uncertain-flat-peak-contour'
+        event['reviewRequired']=True;event['reviewReason']='contextual-pitch-target'
+        event['confidence']=0
+        event['centsDeviation']=round(abs(center-event['midi'])*100,1)
+        proposals.append(dict(start=event['start'],end=event['end'],fromMidi=original,
+                              proposedMidi=event['midi'],pitchCenterMidi=center,
+                              reason=event['targetReason']))
+    return proposals
 
 
 def estimate_tuning(raw, valid, voiced, prob, step, cfg):
@@ -100,7 +235,7 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
             connected[a:b] = True
             filled += 1
     labels = np.zeros(len(raw), int)  # display only; never feeds segmentation
-    events, all_cores = [], []
+    events, all_cores, transitions = [], [], []
     onsets = sorted(set(int(round(t/step)) for t in onset_times))
     for a, b, yes in runs(connected):
         if not yes or not np.any(prob[a:b][valid[a:b]] >= cfg['seedVoicing']):
@@ -154,6 +289,8 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
                         center = median(trend[start:i], prob[start:i])
                         cores.append(dict(a=start, b=i, center=center))
                     start = i
+        cores, removed = transition_cores(cores, raw, valid, step, cfg, onsets, energy)
+        transitions.extend(removed)
         # Group stable cores with DP. A merge pays pitch residual in cents;
         # adding an event has a penalty. Never merge across an independent
         # semitone core, and do not give large jumps special permission to merge.
@@ -234,12 +371,13 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
     recovered = []
     if cfg['recoverLowConfidence'] and events and energy is not None:
         # A second, explicitly uncertain lane. Never reinterpret unvoiced
-        # guesses, silent frames, source-gated (prob=0) frames, or the prelude.
+        # guesses, silent frames, or source-gated (prob=0) frames.
         # The strict lane and its tuning estimate remain untouched.
         uncovered = finite & voiced & (prob >= cfg['recoveryVoicing'])
         uncovered &= energy[:len(raw)] >= max(.0008, float(np.max(energy))*.025)
         bounds = np.arange(len(raw))*step
-        uncovered &= (bounds >= events[0]['start']) & (bounds < events[-1]['end'])
+        first_strict_start = events[0]['start']
+        uncovered &= (bounds >= max(0, first_strict_start-cfg['onsetRecoveryLookback'])) & (bounds < events[-1]['end'])
         for event in events:
             uncovered &= ~((bounds >= event['start']-step/2) & (bounds < event['end']-step/2))
         if uncovered.any():
@@ -252,6 +390,11 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
                  'seedVoicing': cfg['recoveryVoicing'], 'minCore': .08,
                  'missingGap': 0})
             for event in candidates:
+                # Only a nearby acoustic onset can justify recovering a weak
+                # first note. Do not promote quiet accompaniment in the intro.
+                if event['start'] < first_strict_start and not any(
+                        abs(k*step-event['start']) <= .08+1e-8 for k in onsets):
+                    continue
                 core_seconds = sum(max(0, min(event['end'], c['end'])-max(event['start'], c['start']))
                                    for c in recovery_diag['cores'])
                 if event['end']-event['start']+1e-8 < cfg['recoveryMinDuration'] or core_seconds+1e-8 < cfg['recoveryMinCore']:
@@ -301,7 +444,15 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
             attached += 1
         else:
             events.append(event)
+    events, noise_fragments = absorb_noise_fragments(events, step, cfg, onsets, energy)
+    target_proposals = contextual_pitch_targets(events)
+    for event in events:
+        if event.get('absorbedFragments') or event.get('targetReason'):
+            begin,finish=event['evidenceFrameRange'];labels[begin:finish]=event['midi']
     return events, labels, dict(version=VERSION,config=cfg,cores=all_cores,filledDropouts=filled,
+                               absorbedTransitions=transitions,
+                               absorbedNoiseFragments=noise_fragments,
+                               contextualPitchProposals=target_proposals,
                                uncertainEvents=sum(e['pitchStatus']=='uncertain' for e in events),
                                confidenceMeaning='voicingProbability is not pitch correctness probability',
                                recoveredLowConfidenceEvents=len(recovered),

@@ -4,12 +4,13 @@ import {timedLyricLayout} from './timed-lyric-layout.js';
 export function layout(score,minimumVerses=0){
  let plan=baseLayout(score,minimumVerses);
  let timed=timedLyricLayout(score,plan);
- if(timed.verseCount>plan.verseCount){plan=baseLayout(score,timed.verseCount);timed=timedLyricLayout(score,plan);}
+ if(plan.measures.some(m=>m.width<(timed.minimumMeasureWidths.get(m.m.id)||0))){plan=baseLayout(score,minimumVerses,timed.minimumMeasureWidths);timed=timedLyricLayout(score,plan);}
  plan.timedLyrics=timed.items;plan.lyricCollisions=timed.collisions;
+ plan.lyricSpacingAdjustments=timed.spacingAdjustments;
  plan.width=Math.max(plan.width,...timed.items.map(item=>item.x+48));
  return plan;
 }
-function baseLayout(score,minimumVerses=0){
+function baseLayout(score,minimumVerses=0,minimumMeasureWidths=new Map()){
  const verseCount=Math.max(minimumVerses,score.lyricAlignment?.verse||0,...(score.lyrics||[]).map(l=>l.verse));
  const lyricWidths=new Map();for(const l of score.lyrics||[])lyricWidths.set(l.noteId,Math.max(lyricWidths.get(l.noteId)||0,lyricWidth(l.text)+16));
  const maxWidth=1120,left=38,right=38,rowGap=(score.chords?.length?180:156)+(score.showGuitarDiagrams&&score.chords?.length?85:0)+Math.max(0,verseCount-1)*26,baseline=(score.endings?.length?144:score.chords?.length?148:128)+(score.showGuitarDiagrams&&score.chords?.length?85:0);
@@ -19,7 +20,9 @@ function baseLayout(score,minimumVerses=0){
    const duration=ticks(n),beats=duration/16,lyric=lyricWidths.get(n.id)||0,leftInset=Math.max(0,(lyric-16)/2-12);
    const width=Math.max(leftInset+Math.max(n.accidental?42:32,beats*36)+(n.dots?12:0)+(n.grace?22:0),lyric);
    const result={n,start:time,duration,width,leftInset,beams:n.base===16?2:n.base===8?1:0};time+=duration;return result;
-  });const startPad=m.repeatStart?29:16;return {m,mi,notes,startPad,width:Math.max(132,startPad+notes.reduce((sum,n)=>sum+n.width,0)+18)};
+  });const startPad=m.repeatStart?29:16,total=notes.reduce((sum,n)=>sum+n.width,0),width=Math.max(132,startPad+total+18,minimumMeasureWidths.get(m.id)||0);
+  if(total&&width>Math.max(132,startPad+total+18)){const stretch=(width-startPad-18)/total;for(const n of notes)n.width*=stretch;}
+  return {m,mi,notes,startPad,width};
  });
  for(let offset=0;offset<prepared.length;){
   let count=Math.min(4,prepared.length-offset);

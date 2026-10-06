@@ -1,3 +1,5 @@
+import {validatedReview} from './audio-debug-review.js';
+import {relabelScore,referenceDo,keyPc} from './pitch.js';
 import {importedAudioMode,importedAudioDuration} from './audio-input-mode.js';
 import {applyAcousticLyrics,alignLyricsByAnchors,timedCharacters,correctTimedText,parseLRC,applyTimedLyrics,applySequentialLyrics} from './lyric-alignment.js';
 import {downloadFile} from './files.js';
@@ -54,6 +56,17 @@ export function createProjectController({frames,activate}){
      project=await enqueue(()=>api('/'+project.id+'/source?name='+encodeURIComponent(data.file.name),{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:data.file}));project=await enqueue(()=>patch({workspace:{transcribe:{...project.workspace.transcribe,sourceMode:importedAudioMode(data),clipDuration:importedAudioDuration(data),clipStart:'0'}}}));payload={project,session};refreshView(frames.editor?'editor':'transcribe');display();
     }else if(data.action==='reload'){await queue;project=await api('/'+project.id);payload={project,session};display();}
     else if(data.action==='apply-lyrics'){await flush();if(project.scoreBasedOn!==data.runId)throw Error('请先将本次识别结果送入编辑器');const plan=data.plan;if(!plan)throw Error('还没有排好的歌词');if(project.score.lyrics?.some(l=>l.verse===plan.verse)&&!confirm('将替换修订谱中这一段歌词，保留音符。是否继续？'))throw Error('已取消替换歌词');let mapped;if(plan.method==='acoustic'){const alignment=await api(`/${project.id}/asset?path=${encodeURIComponent(`runs/${data.runId}/lyrics-alignment.json`)}`);mapped=applyAcousticLyrics(project.score,alignment,{verse:plan.verse});}else if(plan.method==='sequential')mapped=applySequentialLyrics(project.score,plan.text,{verse:plan.verse,start:plan.start});else{const run=project.runs.find(r=>r.id===data.runId);const chars=plan.type==='auto'?timedCharacters((data.lyrics?.words||[]).filter(w=>w.probability>=.5)):plan.method==='anchors'?alignLyricsByAnchors(plan.text,data.lyrics?.words,{score:project.score}).chars:plan.method==='lrc'?parseLRC(plan.text,{clipStart:run.params.start,duration:run.params.duration}):correctTimedText(plan.text,data.lyrics?.words);if(!chars.length)throw Error('没有可靠歌词可应用');mapped=applyTimedLyrics(project.score,chars,{verse:plan.verse});}if(mapped.unplaced.length&&plan.method!=='acoustic')throw Error('部分歌词无法对应到当前修订谱，请在编辑器中手动调整');await enqueue(()=>patch({score:mapped.score}));refreshView('editor');payload={ok:true};}
+    else if(data.action==='save-debug-review'){
+     if(!project.runs.some(r=>r.id===data.runId))throw Error('识别版本不存在');
+     if(typeof data.key!=='string'||!data.key||data.key.length>180)throw Error('标注标识不合法');
+     const record=data.record===null?null:validatedReview(data.record);if(record&&record.key!==data.key)throw Error('标注对象不匹配');
+     await enqueue(()=>{const debug=project.workspace.audioDebug||{},reviews={...debug.reviews},records={...reviews[data.runId]};record?records[data.key]=record:delete records[data.key];reviews[data.runId]=records;return patch({workspace:{audioDebug:{...debug,reviews}}});});payload={project,session};
+    }
+    else if(data.action==='apply-debug-do'){
+     await flush();if(project.scoreBasedOn!==data.runId)throw Error('当前谱不属于此识别版本');
+     await enqueue(()=>{const score=relabelScore(project.score,data.key,{...project.score.keyMap,status:'confirmed',locked:true,source:'debug-manual',tonicPc:null,mode:'unknown',referenceDoMidi:Math.floor(referenceDo(project.score)/12)*12+keyPc(data.key)});return patch({score,archiveScore:true,workspace:{transcribe:{...project.workspace.transcribe,key:data.key,scoreEdited:true}}});});
+     for(const v of Object.keys(frames))if(v!==view)refreshView(v);payload={project,session};
+    }
     else if(data.action==='enter-editor'){await editorEntry(data.runId);payload={ok:true};}
     else if(data.action==='save'){await savePackage(data.saveAs);payload={ok:true};}
     else if(data.action==='new'){$('newProjectDialog').showModal();payload={ok:true};}

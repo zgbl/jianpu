@@ -132,7 +132,8 @@ def run(args):
         if probs[i] < probability_floor:
             return 'low-voicing'
         return 'eligible'
-    observations = [{'time': round(i * hop / sample_rate, 4), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 3) if np.isfinite(f0[i]) and f0[i] > 0 else None, 'voiced': bool(raw_voiced[i]), 'decoderEligible': frame_decision(i)=='eligible', 'decoderRejection': frame_decision(i), 'eligibleV2':bool(voiced[i]), 'energy':round(float(rms[i]),7), 'voicingProbability':round(float(probs[i]),4), 'pitchReliability':None, 'sourceReliability':None, 'confidence': round(float(probs[i]), 4), 'cleanedMidi': int(cleaned_pitch[i])} for i in range(len(f0))]
+    metadata['decoderThresholds']={'voicingProbability':probability_floor,'energy':energy_floor,'sourceRatio':.04 if args.mode=='mixed' else 0}
+    observations = [{'time': round(i * hop / sample_rate, 4), 'midi': round(float(69 + 12 * np.log2(f0[i] / 440)), 3) if np.isfinite(f0[i]) and f0[i] > 0 else None, 'voiced': bool(raw_voiced[i]), 'decoderEligible': frame_decision(i)=='eligible', 'decoderRejection': frame_decision(i), 'eligibleV2':bool(voiced[i]), 'energy':round(float(rms[i]),7), 'voicingProbability':round(float(probs[i]),4), 'pitchReliability':None, 'sourceReliability':None, 'sourceRatio':round(float(rms[i]/(mixed_rms[i]+1e-8)),6) if args.mode=='mixed' else None, 'confidence': round(float(probs[i]), 4), 'cleanedMidi': int(cleaned_pitch[i])} for i in range(len(f0))]
     (output / 'pitch-observations.json').write_text(json.dumps({'version': pitch_diagnostics['version'], 'metadata':metadata,'frames': observations}), encoding='utf8')
     progress('rhythm', '从鼓声／原曲建立节拍时间轴，保留原始音符时间', .9)
     # A lightweight onset autocorrelation avoids native beat-tracker crashes on

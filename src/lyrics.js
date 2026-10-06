@@ -11,6 +11,7 @@ export function validateLyrics(score,events){
   if(typeof l.text!=='string'||l.text.length>80||!l.text.trim())throw Error(`歌词音符、段落或文字不合法：${context} 的文字须为非空字符串，最多80字符`);
   if(keys.has(key))throw Error(`歌词音符、段落或文字不合法：${context} 在同一音符同一段重复`);
   if(l.offsetX!==undefined&&(!Number.isFinite(l.offsetX)||Math.abs(l.offsetX)>2000))throw Error('歌词位置不合法');
+  if(l.charOffsets!==undefined&&(!Array.isArray(l.charOffsets)||l.charOffsets.length!==Array.from(l.text).length||l.charOffsets.some(x=>!Number.isFinite(x)||Math.abs(x)>2000)))throw Error('逐字歌词位置不合法');
   if(l.endNoteId&&(!end||end.order<n.order))throw Error('拖腔结束音符不合法');keys.add(key);
  }
 }
@@ -19,7 +20,13 @@ export function setLyric(score,noteId,verse,text,endNoteId){
  if(!Number.isInteger(verse)||verse<1||verse>4)throw Error('歌词段落应为 1–4');
  text=text.trim();if(text.length>80)throw Error('单个音符的歌词最多 80 个字符');
  score.lyrics??=[];const old=score.lyrics.find(l=>l.noteId===noteId&&l.verse===verse);score.lyrics=score.lyrics.filter(l=>l.noteId!==noteId||l.verse!==verse);
- if(text)score.lyrics.push({noteId,verse,text,...(old?.offsetX?{offsetX:old.offsetX}:{}),...(endNoteId?{endNoteId}:{})});
+ if(text)score.lyrics.push({noteId,verse,text,manual:true,...(old?.offsetX?{offsetX:old.offsetX}:{}),...(old?.text===text&&old.charOffsets?{charOffsets:old.charOffsets}:{}),...(endNoteId?{endNoteId}:{})});
+}
+export function moveManualLyricCharacter(score,noteId,verse,index,delta){
+ const lyric=score.lyrics?.find(l=>l.noteId===noteId&&l.verse===verse),chars=Array.from(lyric?.text||'');
+ if(!lyric||!Number.isInteger(index)||index<0||index>=chars.length||!Number.isFinite(delta))throw Error('请选择要移动的歌词字');
+ const offsets=lyric.charOffsets?[...lyric.charOffsets]:chars.map(()=>0),value=offsets[index]+delta;
+ if(Math.abs(value)>2000)throw Error('歌词移动距离过大');offsets[index]=Math.round(value*10)/10;lyric.charOffsets=offsets;lyric.manual=true;
 }
 export function lyricTokens(text){
  const clean=text.trim();if(!clean)return [];

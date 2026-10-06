@@ -2,3 +2,5 @@
 
 .flag rect{fill:transparent!important;stroke:none!important}.flag .digit{fill:#a16a20!important}
 #alignmentInfo.alignment-fallback{color:#a45b20;font-weight:600}
+
+.sheet svg{min-width:calc(100% * var(--score-width-factor,1))}

@@ -1,8 +1,11 @@
+import {preserveManualLyrics} from './manual-lyric-anchors.js';
+import {preserveUncoveredASRLyrics} from './lyric-coverage.js';
+import {repairCollapsedLyricTiming} from './lyric-phrase-repair.js';
 import {validate} from './model.js';
 const characters=text=>Array.from(text.normalize('NFKC')).filter(c=>/[\p{L}\p{N}]/u.test(c));
 export function timedCharacters(words){
  const result=[];
- for(const word of words||[]){if(!Number.isFinite(word.start)||!Number.isFinite(word.end)||word.end<=word.start)continue;const chars=characters(word.text||''),step=(word.end-word.start)/chars.length;chars.forEach((text,i)=>result.push({text,start:word.start+i*step,end:word.start+(i+1)*step,probability:word.probability}));}
+ for(const word of words||[]){if(!Number.isFinite(word.start)||!Number.isFinite(word.end)||word.end<=word.start)continue;const chars=characters(word.text||''),step=(word.end-word.start)/chars.length;chars.forEach((text,i)=>result.push({text,start:word.characters?.[i]?.start??word.start+i*step,end:word.characters?.[i]?.end??word.start+(i+1)*step,probability:word.probability,...(word.manual?{manual:true}:{})}));}
  return result;
 }
 export function correctTimedText(text,words){
@@ -36,13 +39,13 @@ export function applyTimedLyrics(score,chars,{verse=1,maxGap=1.2}={}){
  for(const lyric of buckets.values()){let id=lyric.noteId;while(next.spans.some(s=>s.type==='tie'&&s.from===id))id=next.spans.find(s=>s.type==='tie'&&s.from===id).to;if(id!==lyric.noteId&&all.some(n=>n.id===id))lyric.endNoteId=id;}
  next.lyrics=[...(next.lyrics||[]).filter(l=>l.verse!==verse),...buckets.values()];
  next.lyricAlignment={version:1,verse,displayMode:'characters',source:'word-timestamps',characters:accepted.map((c,i)=>({...c,id:`timed-${verse}-${i}`,status:'estimated',evidence:'word-time-estimate'})),pending:[]};
- return {score:validate(next),count:chars.length-unplaced.length,unplaced,warnings:['逐字时间由词级/句级时间估计；每个字独立显示和拖动。']};
+ return {score:validate(preserveManualLyrics(score,next,verse)),count:chars.length-unplaced.length,unplaced,warnings:['逐字时间由词级/句级时间估计；每个字独立显示和拖动。']};
 }
 export function applySequentialLyrics(score,text,{verse=1,start=0}={}){
  const next=structuredClone(score),notes=candidates(next).slice(start),chars=characters(text),buckets=new Map();if(!notes.length||!chars.length)throw Error('请输入歌词并选择有音高的起点');
  chars.forEach((text,i)=>{const index=chars.length<=notes.length?i:Math.floor(i*notes.length/chars.length),n=notes[index],old=buckets.get(n.id)||{noteId:n.id,verse,text:''};old.text+=text;buckets.set(n.id,old);});
  if([...buckets.values()].some(l=>l.text.length>80))throw Error('歌词太多，请分段输入');next.lyrics=[...(next.lyrics||[]).filter(l=>l.verse!==verse),...buckets.values()];
- return {score:validate(next),count:chars.length,unplaced:[],warnings:['没有歌唱时间信息，仅按音符顺序初排；位置必须手动核对。']};
+ return {score:validate(preserveManualLyrics(score,next,verse)),count:chars.length,unplaced:[],warnings:['没有歌唱时间信息，仅按音符顺序初排；位置必须手动核对。']};
 }
 
 // Local sequence alignment locates a sung excerpt inside complete lyrics. Only
@@ -66,9 +69,9 @@ export function alignLyricsByAnchors(text,words,{score=null}={}){
  while(i&&j){const d=directions[i*width+j];if(!d)break;if(d===1){if(source[i-1].text===target[j-1])pairs.push({source:i-1,target:j-1});i--;j--;}else if(d===2)i--;else j--;}
  pairs.reverse();const runs=[];
  for(const p of pairs){const last=runs.at(-1),end=last?.at(-1);if(end&&p.source===end.source+1&&p.target===end.target+1)last.push(p);else runs.push([p]);}
- const trusted=runs.filter(run=>run.length>=2);
+ const trusted=runs.filter(run=>run.length>=2||run.some(p=>source[p.source].manual));
  const anchorPairs=trusted.flat();
- if(anchorPairs.length<4||best<5)throw Error('找不到足够的连续匹配词句，尚不能按锚点校准；请检查歌词版本或先识别更长片段');
+ if((anchorPairs.length<4||best<5)&&!anchorPairs.some(p=>source[p.source].manual))throw Error('找不到足够的连续匹配词句，尚不能按锚点校准；请检查歌词版本或先识别更长片段');
  const anchors=trusted.map(run=>({text:run.map(p=>target[p.target]).join(''),targetStart:run[0].target,targetEnd:run.at(-1).target+1,start:source[run[0].source].start,end:source[run.at(-1).source].end}));
  // Include incomplete edge words in the matched lyric lines, not unrelated
  // verses outside the recognized excerpt. Long unsupported edges stay pending.
@@ -103,10 +106,12 @@ export function alignLyricsByAnchors(text,words,{score=null}={}){
 export function completeAcousticCharacters(alignment){
  const chars=structuredClone(alignment.characters||[]).map((c,i)=>({...c,id:c.id||`char-${i}`}));
  const anchors=chars.map((c,i)=>({c,i})).filter(({c})=>c.status==='acoustic'&&Number.isFinite(c.start));
+ const acousticallySupportedLines=new Set(anchors.map(({c})=>c.lineId).filter(Boolean));
  const rates=anchors.slice(1).map((a,k)=>(a.c.start-anchors[k].c.start)/(a.i-anchors[k].i)).filter(v=>v>0&&v<2).sort((a,b)=>a-b);
  const rate=rates.length?rates[Math.floor(rates.length/2)]:.3;
  for(let i=0;i<chars.length;i++){
-  const c=chars[i];if(!c.timingUnresolved&&Number.isFinite(c.start)&&Number.isFinite(c.end)&&c.end>c.start)continue;
+  const c=chars[i];if(c.timingUnresolved&&c.lineId&&!acousticallySupportedLines.has(c.lineId))continue;
+  if(!c.timingUnresolved&&Number.isFinite(c.start)&&Number.isFinite(c.end)&&c.end>c.start)continue;
   const left=anchors.filter(a=>a.i<i).at(-1),right=anchors.find(a=>a.i>i&&(!left||a.c.start>(left.c.end??left.c.start)+.001));
   let start,length=rate;
   if(left&&right){
@@ -125,7 +130,8 @@ export function moveAlignedCharacter(score,id,noteId,offsetX=0){
  if(!c||!score.measures.some(m=>m.notes.some(n=>n.id===noteId)))throw Error('歌词或目标音符不存在');
  c.placement={noteId,offsetX,manual:true};
 }
-export function applyAcousticLyrics(score,alignment,{verse=1}={}){
+export function applyAcousticLyrics(score,alignment,{verse=1,words=[]}={}){
+ alignment=preserveUncoveredASRLyrics(repairCollapsedLyricTiming(alignment,words),words);
  const next=structuredClone(score),characters=completeAcousticCharacters(alignment);
  const prior=new Map((score.lyricAlignment?.characters||[]).map(c=>[c.id,c]));
  for(const c of characters){const old=prior.get(c.id);if(old?.text===c.text&&old.placement?.manual)c.placement=structuredClone(old.placement);}
@@ -133,5 +139,5 @@ export function applyAcousticLyrics(score,alignment,{verse=1}={}){
  const lines=(alignment.lines||[]).map(line=>{const cs=characters.filter(c=>c.lineId===line.id);return cs.length&&cs.every(c=>Number.isFinite(c.start)&&Number.isFinite(c.end))?{...line,timingUnresolved:false,timingEstimated:cs.some(c=>c.timingEstimated),status:cs.some(c=>c.timingEstimated)?'estimated':line.status}:line;});
  next.lyricAlignment={...structuredClone(alignment),lines,characters,verse,pending:[],displayMode:'characters',legacyLyrics:alignment.legacyLyrics||structuredClone((score.lyrics||[]).filter(l=>l.verse===verse))};
  const unresolved=characters.filter(c=>c.timingUnresolved);
- return {score:validate(next),count:characters.length-unresolved.length,unplaced:unresolved.map(c=>c.text),warnings:[...(alignment.warnings||[]),...(unresolved.length?[`${unresolved.length} 字整句缺少可靠时间，保留待定位，未硬排入谱面。`]:[]),`${characters.filter(c=>c.status==='estimated').length} 字按锚点估算，棕色标记；可逐字拖动核对。`]};
+ return {score:validate(preserveManualLyrics(score,next,verse)),count:characters.length-unresolved.length,unplaced:unresolved.map(c=>c.text),warnings:[...(alignment.warnings||[]),...(unresolved.length?[`${unresolved.length} 字整句缺少可靠时间，保留待定位，未硬排入谱面。`]:[]),`${characters.filter(c=>c.status==='estimated').length} 字按锚点估算，棕色标记；可逐字拖动核对。`]};
 }

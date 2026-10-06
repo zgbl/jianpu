@@ -38,3 +38,6 @@
 .image-score-review{padding:8px 12px;background:#fff0e5;color:#8d451e;font-size:12px;font-weight:700;border-top:1px solid #eac8ad}.image-score-review[hidden]{display:none}
 .key-panel [data-chord-status]{padding:8px 10px;border-left:3px solid var(--teal);background:#edf5f1;overflow-wrap:anywhere}.key-panel [data-chord-status].error{color:#9d4028;border-color:#b6472e;background:#fff2ed}
 .key-panel .chord-color-control input{width:180px;padding:0;min-height:24px}.key-panel .chord-diagram-toggle{display:flex;align-items:center;gap:5px}.key-panel .chord-diagram-toggle input{width:16px;min-height:16px}.guitar-library svg{display:block;width:100%;max-width:700px;height:auto}.guitar-library{border-top:1px solid var(--line);padding-top:8px}.guitar-chord-diagram{color:#416d63}
+
+/* 密集歌词只扩大小节；宽谱横向查看，不缩小全谱字音。 */
+.paper svg{min-width:calc(100% * var(--score-width-factor,1))}

@@ -4,6 +4,22 @@ const NAMES=['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
 export function pitchLabel(m){if(!Number.isFinite(m))return '—';const n=Math.round(m);return NAMES[((n%12)+12)%12]+(Math.floor(n/12)-1);}
 export function timeLabel(t){return `${Math.floor(t/60)}:${(t%60).toFixed(2).padStart(5,'0')}`;}
 export function clampWindow(start,end,min,max){const width=Math.min(max-min,Math.max(.25,end-start));start=Math.max(min,Math.min(max-width,start));return [start,start+width];}
+export const centsLabel=c=>Number.isFinite(c)?`${c>0?'+':''}${(Math.abs(c)<.05?0:c).toFixed(1)} 音分`:'未提供';
+export function selectDebugRun(project,previousProject,selectedRun){
+ const completed=project.runs.filter(r=>r.status==='done');
+ const keep=previousProject?.id===project.id&&previousProject.scoreBasedOn===project.scoreBasedOn;
+ return (keep&&completed.find(r=>r.id===selectedRun?.id))||completed.find(r=>r.id===(project.scoreBasedOn||project.activeRunId))||completed.at(-1);
+}
+export function pitchDeviation(note,frames=[],tuningCents=null,targetMidi=note.midi){
+ // Saved V3 centers are tuning-corrected; observation frames retain raw A440 MIDI.
+ const target=targetMidi,hasCore=Number.isFinite(note.coreStart)&&Number.isFinite(note.coreEnd)&&note.coreEnd>note.coreStart;
+ if(!Number.isFinite(target))return {rawCents:null,correctedCents:null,rawHz:null,spread:null,count:0,basis:'无目标音高'};
+ const samples=hasCore?frames.filter(f=>f.time>=note.coreStart&&f.time<note.coreEnd&&f.voiced===true&&Number.isFinite(f.midi)).map(f=>f.midi).sort((a,b)=>a-b):[];
+ const center=Number.isFinite(note.pitchCenterMidi)?note.pitchCenterMidi:null,knownTuning=Number.isFinite(tuningCents);
+ const median=samples.length?(samples[Math.floor((samples.length-1)/2)]+samples[Math.ceil((samples.length-1)/2)])/2:null;
+ const rawCenter=center!==null&&knownTuning?center+tuningCents/100:median;
+ return {rawCents:rawCenter===null?null:(rawCenter-target)*100,correctedCents:center===null?null:(center-target)*100,rawHz:rawCenter===null?null:midiHz(rawCenter),spread:samples.length?[(samples[Math.floor((samples.length-1)*.1)]-target)*100,(samples[Math.ceil((samples.length-1)*.9)]-target)*100]:null,count:samples.length,basis:center!==null&&knownTuning?'已保存中心还原整体调律':median!==null?'稳定核心有声帧中位数':'原始偏差证据不足'};
+}
 export function normalizeDebugData(observations,candidates,result,run={}){
  const meta=observations?.metadata||candidates?.metadata||{};
  const offset=Number.isFinite(meta.clipStart)?meta.clipStart:Number(result?.clipStart??run.params?.start??0);
@@ -12,6 +28,7 @@ export function normalizeDebugData(observations,candidates,result,run={}){
  const energyFloor=diagnostics.energyThreshold??Math.max(.0008,...(observations?.frames||[]).map(f=>(f.energy||0)*.025));
  const frames=(full?observations.frames:result?.pitchTrack||[]).filter(f=>Number.isFinite(f.time)).map(f=>({...f,time:f.time+offset,midi:Number.isFinite(f.midi)?f.midi:null,voicingProbability:f.voicingProbability??f.confidence,voiced:full?f.voiced:null,...(full?{decoderEligibilityEstimated:f.decoderEligible===undefined,decoderEligible:f.decoderEligible??(f.voiced&&Number.isFinite(f.midi)&&(f.voicingProbability??f.confidence??0)>=(cfg.continuationVoicing??.35)&&(f.energy??Infinity)>=energyFloor),decoderRejection:f.decoderRejection??(!f.voiced?'unvoiced':!Number.isFinite(f.midi)?'missing-pitch':(f.energy??Infinity)<energyFloor?'low-energy':(f.voicingProbability??f.confidence??0)<(cfg.continuationVoicing??.35)?'low-voicing':'eligible')}:{})}));
  const notes=(candidates?.notes||result?.notes||[]).filter(n=>Number.isFinite(n.start)&&Number.isFinite(n.end)&&n.end>n.start).map((n,i)=>({...n,index:i,start:n.start+offset,end:n.end+offset,performanceStart:(n.performanceStart??n.start)+offset,performanceEnd:(n.performanceEnd??n.end)+offset,coreStart:Number.isFinite(n.coreStart)?n.coreStart+offset:null,coreEnd:Number.isFinite(n.coreEnd)?n.coreEnd+offset:null}));
+ for(const n of notes)n.deviation=pitchDeviation(n,frames,diagnostics.tuningCents);
  const duration=result?.duration||Math.max(0,...notes.map(n=>n.end-offset),...frames.map(f=>f.time-offset));
  return {offset,min:offset,max:offset+duration,frames,notes,meta,full,diagnostics,onsets:(candidates?.onsetTimes||[]).map(t=>t+offset)};
 }

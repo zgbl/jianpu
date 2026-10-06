@@ -17,6 +17,38 @@ class StablePitch(unittest.TestCase):
     def test_short_stable_note_is_preserved(self):
         e,_,_=self.decode([60]*16+[62]*5+[64]*16)
         self.assertEqual([n['midi'] for n in e],[60,62,64])
+    def test_flat_peak_near_boundary_is_proposed_as_distinct_note_and_stays_uncertain(self):
+        events,_,d=self.decode(np.r_[[57.1]*20,[59.4]*12,[np.nan]*8,[59.05]*12,[57]*20],energy=np.ones(72))
+        self.assertEqual([e['midi'] for e in events],[57,60,59,57])
+        peak=events[1];self.assertEqual(peak['pitchStatus'],'uncertain');self.assertEqual(peak['confidence'],0)
+        self.assertEqual(peak['acousticNearestMidi'],59);self.assertEqual(peak['pitchAlternatives'],[59,60])
+        self.assertAlmostEqual(peak['pitchCenterMidi'],59.4);self.assertEqual(len(d['contextualPitchProposals']),1)
+    def test_ordinary_intonation_repeats_and_coreless_peaks_are_not_raised(self):
+        events,_,d=self.decode(np.r_[[57]*20,[59.2]*12,[59.05]*12,[57]*20])
+        self.assertNotIn(60,[e['midi'] for e in events]);self.assertEqual(d['contextualPitchProposals'],[])
+    def test_brief_plateau_in_smooth_scoop_uses_destination_not_extra_semitone(self):
+        pitches=np.r_[[58.2]*5,[58.4,58.6,58.9,59.1],[59.3]*14]
+        events,_,d=self.decode(pitches,energy=np.ones(len(pitches)),onsets=[.032])
+        self.assertEqual([e['midi'] for e in events],[59])
+        self.assertEqual(events[0]['start'],0)
+        self.assertEqual(len(d['absorbedTransitions']),1)
+        self.assertTrue(any(o['type']=='scoop' for o in events[0]['ornaments']))
+    def test_short_semitone_with_discrete_step_or_reattack_is_kept(self):
+        events,_,_=self.decode(np.r_[[58.2]*5,[59.3]*14])
+        self.assertEqual([e['midi'] for e in events],[58,59])
+        pitches=np.r_[[58.2]*5,[58.4,58.6,58.9,59.1],[59.3]*14]
+        energy=np.ones(len(pitches));energy[4:6]=.2
+        events,_,_=self.decode(pitches,energy=energy,onsets=[.096])
+        self.assertEqual([e['midi'] for e in events],[58,59])
+    def test_weak_first_note_needs_nearby_onset_and_stable_core(self):
+        pitches=np.r_[[59]*20,[57]*20,[60]*20]
+        prob=np.r_[[.08]*20,[.9]*40]
+        events,_,_=self.decode(pitches,energy=np.ones(len(pitches)),probability=prob,onsets=[0])
+        self.assertEqual([e['midi'] for e in events],[59,57,60])
+        self.assertEqual(events[0]['pitchStatus'],'uncertain')
+        self.assertTrue(events[0]['reviewRequired'])
+        events,_,_=self.decode(pitches,energy=np.ones(len(pitches)),probability=prob)
+        self.assertEqual([e['midi'] for e in events],[57,60])
     def test_vibrato_crossing_integer_boundary_is_one_note(self):
         t=np.arange(80)*.016
         e,_,_=self.decode(60+.6*np.sin(2*np.pi*6*t))
@@ -24,6 +56,26 @@ class StablePitch(unittest.TestCase):
     def test_coreless_glide_is_uncertain_not_semitone_ladder(self):
         e,_,_=self.decode(np.linspace(60,70,45))
         self.assertEqual(len(e),1);self.assertEqual(e[0]['pitchStatus'],'uncertain');self.assertIsNone(e[0]['coreStart'])
+    def test_brief_coreless_noise_attaches_to_dominant_range_not_pitch_center(self):
+        main=dict(start=0,end=.4,performanceStart=0,performanceEnd=.4,midi=60,
+                  pitchCenterMidi=60.1,pitchStatus='candidate',coreStart=.032,coreEnd=.368,evidenceFrameRange=[0,25])
+        fragment=dict(start=.4,end=.48,performanceStart=.4,performanceEnd=.48,midi=63,
+                      pitchCenterMidi=63.4,pitchStatus='uncertain',coreStart=None,coreEnd=None,evidenceFrameRange=[25,30])
+        events,absorbed=module.absorb_noise_fragments([main,fragment],.016,module.DEFAULTS,[],np.ones(40))
+        self.assertEqual(len(events),1);self.assertEqual(main['end'],.48)
+        self.assertEqual(main['midi'],60);self.assertEqual(main['pitchCenterMidi'],60.1)
+        self.assertEqual(main['coreEnd'],.368);self.assertEqual(len(absorbed),1)
+    def test_noise_absorption_preserves_reattacks_stable_short_notes_and_silence(self):
+        import copy
+        main=dict(start=0,end=.4,performanceStart=0,performanceEnd=.4,midi=60,
+                  pitchCenterMidi=60.1,pitchStatus='candidate',coreStart=.032,coreEnd=.368,evidenceFrameRange=[0,25])
+        fragment=dict(start=.4,end=.48,performanceStart=.4,performanceEnd=.48,midi=63,
+                      pitchCenterMidi=63.4,pitchStatus='uncertain',coreStart=None,coreEnd=None,evidenceFrameRange=[25,30])
+        for energy,onsets,extra in [(np.r_[np.ones(23),[.2,.2],np.ones(15)],[25],{}),
+                                   (np.r_[np.ones(24),[0],np.ones(15)],[],{}),
+                                   (np.ones(40),[],{'coreStart':.416,'coreEnd':.464})]:
+            events,absorbed=module.absorb_noise_fragments([copy.deepcopy(main),{**fragment,**extra}],.016,module.DEFAULTS,onsets,energy)
+            self.assertEqual(len(events),2);self.assertEqual(absorbed,[])
     def test_real_silence_vs_energy_supported_missing(self):
         pitches=[60]*16+[np.nan]*4+[60]*16
         e,_,_=self.decode(pitches,energy=np.ones(36));self.assertEqual(len(e),1)

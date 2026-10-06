@@ -2,7 +2,7 @@ import {chordWindows,applyChords} from './chords.js';
 import {harmonizeScore} from './chord-harmony.js';
 
 // Report locally before the first network request; never silently ignore a click.
-export function createChordWorkflow({getScore,getContext,getDuration=()=>null,getGranularity=()=>'half',getColor=()=>0,applyScore,feedback,fetcher=fetch,pollMs=800}){
+export function createChordWorkflow({getScore,getContext,getDuration=()=>null,getGranularity=()=>'half',getColor=()=>0,getSeventhLimit=()=>30,applyScore,feedback,fetcher=fetch,pollMs=800}){
  let running=false,controller=null,taskId=null;
  async function json(url,options={}){
   const response=await fetcher(url,{...options,signal:controller.signal});
@@ -20,7 +20,7 @@ export function createChordWorkflow({getScore,getContext,getDuration=()=>null,ge
   if(mode==='score'){
    if(!score){feedback('请先生成或打开乐谱，再按谱配和弦。',{error:true});return;}
    feedback('正在按当前乐谱的旋律、时值和小节配和弦…',{busy:true});
-   try{const next=harmonizeScore(score,{granularity:getGranularity(),color:getColor()});if(!next.chords.length)throw Error('当前谱面没有可用旋律音符，请补正问号或全休止小节。');if(applyScore(next,'已按当前乐谱配和弦')===false)throw Error('请先完成当前谱面编辑。');const assigned=new Set(next.chords.map(c=>c.measureId)),missing=next.measures.length-assigned.size;const matches=[...new Set((next.chordConfiguration.progressionMatches||[]).map(m=>m.degrees.join('')))];feedback(`已按当前乐谱配入 ${next.chords.length} 个和弦，覆盖 ${assigned.size}/${next.measures.length} 个小节${missing?`；${missing} 个小节没有可用旋律，未推测和弦`:''}。${matches.length?`命中完整进行：${matches.join('、')}。`:'未命中完整流行模板，按旋律匹配配置。'}扩展和弦实际占比 ${Math.round((next.chordConfiguration.colorReport?.actual||0)*100)}%（偏好 ${next.chordConfiguration.color||0}%，不含人工和弦）。人工和弦保留，可撤销；这是配法建议，需试听校对。`,{progress:1});}
+   try{const next=harmonizeScore(score,{granularity:getGranularity(),color:getColor(),seventhLimit:getSeventhLimit()});if(!next.chords.length)throw Error('当前谱面没有可用旋律音符，请补正问号或全休止小节。');if(applyScore(next,'已按当前乐谱配和弦')===false)throw Error('请先完成当前谱面编辑。');const assigned=new Set(next.chords.map(c=>c.measureId)),missing=next.measures.length-assigned.size;const matches=[...new Set((next.chordConfiguration.progressionMatches||[]).map(m=>m.degrees.join('')))];feedback(`已按当前乐谱配入 ${next.chords.length} 个和弦，覆盖 ${assigned.size}/${next.measures.length} 个小节${missing?`；${missing} 个小节没有可用旋律，未推测和弦`:''}。${matches.length?`命中完整进行：${matches.join('、')}。`:'未命中完整流行模板，按旋律匹配配置。'}扩展和弦实际占比 ${Math.round((next.chordConfiguration.colorReport?.actual||0)*100)}%（偏好 ${next.chordConfiguration.color||0}%，不含人工和弦）。普通和弦中七和弦 ${next.chordConfiguration.seventhReport?.seventhChords||0}/${next.chordConfiguration.seventhReport?.ordinaryChords||0}，实际占比 ${Math.round((next.chordConfiguration.seventhReport?.actual||0)*100)}%（上限 ${next.chordConfiguration.seventhLimit??30}%）。人工和弦保留，可撤销；这是配法建议，需试听校对。`,{progress:1});}
    catch(e){feedback(`按谱配和弦失败：${e.message}`,{error:true});}
    return;
   }
