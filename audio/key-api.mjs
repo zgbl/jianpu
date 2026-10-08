@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {localPageRequest} from './local-origin.mjs';
 const ID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const kill=child=>{if(child?.pid>0)child.kill();};
 const send=(res,code,value)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
@@ -10,7 +11,7 @@ export function createKeyAPI(root,{projects}={}){
  function publicJob(j){return {id:j.id,projectId:j.projectId,runId:j.runId,kind:j.kind,status:j.status,progress:j.progress,message:j.message,result:j.result};}
  async function handle(req,res,url){if(!url.pathname.startsWith('/api/key/'))return false;
   try{
-   if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host||'')||req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`)throw Error('接口仅供当前本机页面');
+   if(!localPageRequest(req))throw Error('接口仅供本机或局域网同源页面');
    if(url.pathname==='/api/key/jobs'&&req.method==='POST'){
     if([...jobs.values()].some(j=>j.status==='running'))throw Error('已有Do分析正在运行，请稍候或取消');
     let raw='';for await(const c of req){raw+=c;if(raw.length>4096)throw Error('请求过大');}const data=JSON.parse(raw||'{}');const {projectId,runId}=data;

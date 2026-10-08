@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+ <title>谱间 · 乐谱库</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/library.css">
+</head>
+<body>
+ <header class="library-header"><a class="library-brand" href="/" aria-label="谱间工作台"><span>谱</span>谱间<small>音乐工作台</small></a><nav aria-label="主导航"><a href="/library.html" aria-current="page">乐谱库</a><a href="/">听歌识谱</a><a href="/?tab=scoreImage">本机图片识谱</a><a href="/?tab=modelImage">大模型读谱导入</a><a href="/?tab=compare">双谱校对</a><a href="/?tab=audioDebug">音频调试</a></nav></header>
+ <main>
+  <aside id="catalog"><div class="catalog-heading"><h1>已发布乐谱</h1><button id="refresh" type="button">刷新</button></div><p id="catalogStatus" role="status">正在读取…</p><div id="songs"></div></aside>
+  <section id="viewer" aria-label="乐谱与播放"><div id="empty">选择一首成品乐谱打开。电脑端处理完成后，点击“保存成品到乐谱库”。</div>
+   <div id="scorePanel" hidden><div class="controls"><div class="song-info"><strong id="title"></strong><span id="details"></span></div><button id="play" class="primary" type="button">▶ 播放简谱</button><button id="stop" type="button">■ 停止</button><label>速度 <input id="bpm" type="number" min="40" max="240" step="1"></label><span id="playStatus" role="status"></span></div>
+    <div id="audioPanel" hidden><span>原曲</span><audio id="original" controls preload="none"></audio><label class="cursor-toggle"><input id="showOriginalCursor" type="checkbox" checked> 跟随谱面</label></div>
+    <p class="hint">点击小节可从该小节播放简谱；开启原曲跟随时，点击音符可定位原曲。左右滑动查看谱面。</p><div id="paperScroll"><div id="paper"></div></div>
+   </div>
+  </section>
+ </main>
+ <script type="module" src="/src/library-app.js"></script>
+</body>
+</html>

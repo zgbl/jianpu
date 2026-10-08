@@ -3,13 +3,39 @@ import re
 from difflib import SequenceMatcher
 
 
+def matched_search_end(line, match, words, duration, ceiling=None):
+    """Keep misrecognized suffix syllables inside the acoustic search window."""
+    known=match.get('anchors', {})
+    end=match['end']+1
+    if known:
+        last=max(known); tail=len(line)-last-1; time=known[last]
+        slots=[]
+        for word in words:
+            text=clean_line(word.get('text','')) or ''
+            for i in range(len(text)):
+                start=word['start']+(word['end']-word['start'])*i/len(text)
+                if start>time+.05:slots.append((start,word['end']))
+        slots.sort()
+        # Wrong text still supplies timing evidence. Do not jump across an
+        # instrumental break to borrow the next sentence's syllables.
+        cursor=time;used=[]
+        for start,finish in slots:
+            if len(used)>=tail or start-cursor>4:break
+            used.append((start,finish));cursor=start
+        if used:end=max(end,used[-1][1]+1)
+        end=max(end,time+tail*.65+.5)
+    return min(duration,ceiling if ceiling is not None else duration,end)
+
+
 def clean_line(text):
     if re.search(r'(?:music\s*163\s*(?:\.|\s)*com|百度百科|https?://|www\.)', text, re.I):
         return None
     return re.sub(r'[^\w]', '', re.sub(r'guitar', '吉他', text, flags=re.I))
 
 
-def phrase_windows(lines, source):
+def phrase_windows(lines, source, ordered=False):
+    if ordered:
+        return ordered_phrase_windows(lines, source)
     text=''.join(c for c,_ in source);used=set();result=[];previous_end=0
     for line in lines:
         phrase=clean_line(line);options=[]
@@ -78,3 +104,42 @@ def manual_phrase_windows(lines, manual, matches, duration):
         anchors.update({at+i:word['start']+span*i/len(text) for i in range(len(text))})
         result[li]=dict(start=start,end=end,anchors=anchors,similarity=1,manual=True)
     return result
+
+
+def ordered_phrase_windows(lines, source):
+    """Globally match full pasted lyrics, consuming ASR frames in text order.
+
+    Missing lines can be skipped. Later exact repeats cannot steal a window
+    needed by intervening lines; an unmatched line never falls back backwards.
+    """
+    from bisect import bisect_right
+    text = ''.join(c for c, _ in source)
+    states = {0: (0., [])}
+    for line in lines:
+        phrase = clean_line(line) or ''
+        size = len(phrase)
+        ends = sorted(states)
+        prefix = []
+        best = None
+        for end in ends:
+            if best is None or states[end][0] > best[0]:
+                best = states[end]
+            prefix.append(best)
+        following = {end: (score, path+[None]) for end, (score, path) in states.items()}
+        for start in range(len(source)):
+            previous = prefix[bisect_right(ends, start)-1]
+            for length in range(max(2, int(size*.7)), min(len(source)-start, int(size*1.3)+2)+1):
+                match = SequenceMatcher(None, phrase, text[start:start+length], autojunk=False)
+                blocks = match.get_matching_blocks()
+                ratio = match.ratio()
+                if ratio < .55 or max(b.size for b in blocks) < 2:
+                    continue
+                score = previous[0]+(ratio-.5)*size
+                end = start+length
+                if end in following and following[end][0] >= score:
+                    continue
+                window = dict(start=source[start][1], end=min(source[end-1][1]+.6, source[end][1]) if end<len(source) else source[end-1][1]+.6,
+                              anchors={b.a+k:source[start+b.b+k][1] for b in blocks if b.size>=2 for k in range(b.size)}, similarity=ratio)
+                following[end] = (score, previous[1]+[window])
+        states = following
+    return max(states.values(), key=lambda value:value[0])[1]

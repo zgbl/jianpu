@@ -1,3 +1,4 @@
+import {enforceLyricOrder} from './lyric-order.js';
 import {preserveManualLyrics} from './manual-lyric-anchors.js';
 import {preserveUncoveredASRLyrics} from './lyric-coverage.js';
 import {repairCollapsedLyricTiming} from './lyric-phrase-repair.js';
@@ -110,7 +111,7 @@ export function completeAcousticCharacters(alignment){
  const rates=anchors.slice(1).map((a,k)=>(a.c.start-anchors[k].c.start)/(a.i-anchors[k].i)).filter(v=>v>0&&v<2).sort((a,b)=>a-b);
  const rate=rates.length?rates[Math.floor(rates.length/2)]:.3;
  for(let i=0;i<chars.length;i++){
-  const c=chars[i];if(c.timingUnresolved&&c.lineId&&!acousticallySupportedLines.has(c.lineId))continue;
+  const c=chars[i];if(c.timingUnresolved&&(c.evidence==='transcript-order-conflict'||c.lineId&&!acousticallySupportedLines.has(c.lineId)))continue;
   if(!c.timingUnresolved&&Number.isFinite(c.start)&&Number.isFinite(c.end)&&c.end>c.start)continue;
   const left=anchors.filter(a=>a.i<i).at(-1),right=anchors.find(a=>a.i>i&&(!left||a.c.start>(left.c.end??left.c.start)+.001));
   let start,length=rate;
@@ -131,7 +132,7 @@ export function moveAlignedCharacter(score,id,noteId,offsetX=0){
  c.placement={noteId,offsetX,manual:true};
 }
 export function applyAcousticLyrics(score,alignment,{verse=1,words=[]}={}){
- alignment=preserveUncoveredASRLyrics(repairCollapsedLyricTiming(alignment,words),words);
+ alignment=alignment.text?.trim()?enforceLyricOrder(alignment):preserveUncoveredASRLyrics(repairCollapsedLyricTiming(alignment,words),words);
  const next=structuredClone(score),characters=completeAcousticCharacters(alignment);
  const prior=new Map((score.lyricAlignment?.characters||[]).map(c=>[c.id,c]));
  for(const c of characters){const old=prior.get(c.id);if(old?.text===c.text&&old.placement?.manual)c.placement=structuredClone(old.placement);}

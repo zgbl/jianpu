@@ -12,6 +12,13 @@ test('unrecognized gaps stay editable duration placeholders but render as pendin
  assert.match(render(s,null,-1),/>\?<\/text>/);assert.match(render(s,null,-1),/未识别区间/);assert.equal(parse(JSON.stringify(s)).transcription.unresolvedGaps,gaps.length);
  change(s,0,gaps[0].id,{degree:0});assert.equal(s.measures[0].notes.find(n=>n.id===gaps[0].id).reviewRequired,undefined);
 });
+test('a gap with repeated voiced pitch-track evidence becomes a tinted natural-scale guess and keeps its duration',()=>{
+ const frames=Array.from({length:6},(_,i)=>({time:.55+i*.1,midi:65.1,confidence:.8}));
+ const s=transcriptionToScore({...make([n(60,0,.5),n(67,1.5,2)]),pitchTrack:frames},{key:'C',rhythmMode:'stable',barAnchor:0});
+ const guessed=s.measures.flatMap(m=>m.notes).find(note=>note.reviewReason==='inferred-gap-pitch');
+ assert.ok(guessed);assert.equal(guessed.degree,4);assert.equal(guessed.accidental,undefined);assert.equal(guessed.reviewRequired,true);assert.equal(guessed.pitchStatus,'uncertain');
+ assert.ok(guessed.gridTimeEnd>guessed.gridTimeStart);assert.match(render(s,null,-1),/class="digit inferred-pitch"/);assert.match(render(s,null,-1),/推测的自然音级/);
+});
 test('recovered events carry review provenance into final score and never replace strict evidence sharing a grid slot',()=>{
  const recovered=n(62,.52,.85,{confidence:0,pitchStatus:'uncertain',reviewRequired:true,recoveryReason:'low-voicing-stable-evidence'});
  const s=transcriptionToScore(make([n(60,0,.5),recovered,n(64,1,1.5)]),{key:'C'});

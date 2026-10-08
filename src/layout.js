@@ -20,7 +20,7 @@ function baseLayout(score,minimumVerses=0,minimumMeasureWidths=new Map()){
    const duration=ticks(n),beats=duration/16,lyric=lyricWidths.get(n.id)||0,leftInset=Math.max(0,(lyric-16)/2-12);
    const width=Math.max(leftInset+Math.max(n.accidental?42:32,beats*36)+(n.dots?12:0)+(n.grace?22:0),lyric);
    const result={n,start:time,duration,width,leftInset,beams:n.base===16?2:n.base===8?1:0};time+=duration;return result;
-  });const startPad=m.repeatStart?29:16,total=notes.reduce((sum,n)=>sum+n.width,0),width=Math.max(132,startPad+total+18,minimumMeasureWidths.get(m.id)||0);
+  });const startPad=m.repeatStart?29:16,total=notes.reduce((sum,n)=>sum+n.width,0),width=Math.max(132,startPad+total+18,minimumMeasureWidths.get(m.id)||0,alternativeMeasureWidth(score,m));
   if(total&&width>Math.max(132,startPad+total+18)){const stretch=(width-startPad-18)/total;for(const n of notes)n.width*=stretch;}
   return {m,mi,notes,startPad,width};
  });
@@ -41,3 +41,15 @@ function baseLayout(score,minimumVerses=0,minimumMeasureWidths=new Map()){
  return {width:Math.max(maxWidth,...rowEnds.map(x=>x+right),...(score.lyrics||[]).map(l=>{const p=positions.get(l.noteId);return p?p.x+(l.offsetX||0)+lyricWidth(l.text)/2+right:0;})),height:baseline+row*rowGap+80+verseCount*26,baseline,rowGap,rowEnds,measures,positions,verseCount};
 }
 export function beamSegments(group){const segments=[];for(let level=1;level<=2;level++){const members=group.filter(n=>n.beams>=level);for(let i=0;i<members.length;i++){const n=members[i],next=members[i+1],prev=members[i-1];const connectedNext=next&&group.indexOf(next)===group.indexOf(n)+1;const connectedPrev=prev&&group.indexOf(prev)===group.indexOf(n)-1;if(connectedNext)segments.push({level,x1:n.x-8,x2:next.x+8,y:n.y+9+(level-1)*6});else if(!connectedPrev)segments.push({level,x1:n.x-8,x2:n.x+8,y:n.y+9+(level-1)*6});}}return segments;}
+
+function alternativeMeasureWidth(score,measure){
+ if(!score.showChordAlternatives)return 0;
+ const capacity=score.meter[0]*64/score.meter[1],chords=(score.chords||[]).filter(c=>c.measureId===measure.id).sort((a,b)=>(a.startTick||a.start||0)-(b.startTick||b.start||0));
+ let width=0;
+ for(const [i,c] of chords.entries()){
+  const labels=(c.alternatives||[]).slice(0,2).map(a=>a.label).filter(l=>typeof l==='string');if(!labels.length)continue;
+  const span=Number.isFinite(c.startTick)?Math.max(.1,((chords[i+1]?.startTick??capacity)-c.startTick)/capacity):1/chords.length;
+  width=Math.max(width,(c.label.length*10+(labels.join(' / ').length+4)*6+60)/span);
+ }
+ return width;
+}

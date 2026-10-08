@@ -62,6 +62,10 @@ test('指型调与 Capo 不一致时提示核对，旋律数字不移调',()=>{
  assert.equal(good.score.measures[0].notes[0].degree,3);
  raw.guitarNotation.capo=3;
  assert.match(prepareModelScore(JSON.stringify(raw)).warnings.join(' '),/不一致/);
+ raw.key='F';raw.guitarNotation={version:1,mode:'fingering',shapeKey:'G',capo:-2};
+ const lowered=prepareModelScore(JSON.stringify(raw));
+ assert.equal(lowered.score.guitarNotation.capo,-2);
+ assert.equal(lowered.warnings.length,0);
 });
 
 test('中断输出只恢复完整小节，并标明歌词和和弦可能缺失',async()=>{

@@ -108,6 +108,24 @@ def run(args):
         events, cleaned_pitch, pitch_diagnostics = import_module('stable-pitch').extract_events(f0, raw_voiced, decoder_probs, hop, sample_rate, onset_times, rms)
     else:
         events, cleaned_pitch, pitch_diagnostics = baseline, baseline_pitch, baseline_diagnostics
+    if algorithm == 'stable-v3':
+        articulation = import_module('articulation-evidence')
+        changes = articulation.spectral_changes(mono, sample_rate, hop)
+        raw_midi = np.full(len(f0), np.nan)
+        finite = np.isfinite(f0) & (f0 > 0)
+        raw_midi[finite] = 69 + 12*np.log2(f0[finite]/440)
+        # Source-gated attacks must not become articulation proposals.
+        articulation_energy = rms.copy()
+        if args.mode == 'mixed':
+            articulation_energy[:len(decoder_probs)][decoder_probs == 0] = 0
+        events, articulation_proposals = articulation.split_articulations(
+            events, raw_midi, raw_voiced, decoder_probs, articulation_energy,
+            changes, onset_times, hop/sample_rate)
+        pitch_diagnostics['articulationProposals'] = articulation_proposals
+        for event in events:
+            begin, finish = event['evidenceFrameRange']
+            cleaned_pitch[begin:finish] = event['midi']
+    import_module('timing-evidence').attach_timing_energy(events, rms, hop/sample_rate)
     metadata = {'detector': 'librosa.pyin', 'librosaVersion': librosa.__version__, 'sampleRate':sample_rate,
                 'hopLength':hop,'frameLength':frame_length,'energyFrameLength':1024,'center':True,'padding':'constant',
                 'timeOrigin':'clip-relative seconds','clipStart':args.start,'fmin':65.4,'fmax':1046.5,

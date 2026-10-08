@@ -6,6 +6,7 @@
     "start": "node server.mjs",
     "test": "node --test",
     "dev": "node server.mjs",
+    "dev:lan": "HOST=0.0.0.0 node server.mjs",
     "audio:stems": "node scripts/setup-stems.mjs",
     "audio:setup": "node scripts/setup-audio.mjs",
     "audio:lyrics": "node scripts/setup-lyrics.mjs",

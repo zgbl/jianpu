@@ -15,6 +15,9 @@ test('重启恢复中断或取消的识别状态，不把部分人声文件登�
  }finally{await a.cleanup();}
 });
 async function setup(){const root=await mkdtemp(resolve(tmpdir(),'jianpu-project-test-'));await mkdir(resolve(root,'audio'));await copyFile(resolve('audio/project-archive.py'),resolve(root,'audio/project-archive.py'));return {root,store:createProjectStore(root),cleanup:()=>rm(root,{recursive:true,force:true})};}
+test('iPad screen recording stays a video source so its audio track can be decoded',async()=>{
+ const a=await setup();try{let p=await a.store.create('客户端录屏');p=await a.store.addSource(p.id,Readable.from([Buffer.from('screen recording')]),'演唱录屏.MOV');assert.equal(p.source.path,'audio/original.mov');assert.equal((await readFile(resolve(a.root,'.projects',p.id,p.source.path))).toString(),'screen recording');}finally{await a.cleanup();}
+});
 test('single-workspace regeneration checkpoints edited score before replacing it',async()=>{
  const a=await setup();try{let p=await a.store.create('原地编辑');p.score.measures[0].notes=[note(7)];p=await a.store.patch(p.id,{revision:p.revision,score:p.score});const before=structuredClone(p.score),next=structuredClone(p.score);next.measures[0].notes[0].degree=3;
  p=await a.store.patch(p.id,{revision:p.revision,score:next,archiveScore:true,scoreBasedOn:null,workspace:{transcribe:{unified:true,scoreEdited:false}}});assert.deepEqual(p.history[0].score,before);assert.deepEqual(p.score,next);

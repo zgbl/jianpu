@@ -49,13 +49,13 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 export function guitarDiagram(label,x,y,{capo=0}={}){
  const shape=guitarFingering(label),width=64,height=75;
  if(!shape)return `<g class="guitar-chord-diagram"><title>${esc(label)}：未找到已校验的参考指法</title><text x="${x}" y="${y+26}" font-size="9" fill="#9b641e">指法待补</text></g>`;
- const left=x+12,top=y+14,dx=8,dy=12;let content=`<g class="guitar-chord-diagram" role="img" aria-label="${esc(label)} 吉他参考指法"><title>${esc(label)}：6弦→1弦 ${shape.frets.map(f=>f<0?'×':f).join(' ')}；手指1食指/2中指/3无名指/4小指${capo?`；品位相对Capo ${capo}`:''}${shape.omitted.length?'；扩展和弦省略部分内声部':''}。标准调弦，参考指法需试听。</title>`;
+ const left=x+12,top=y+14,dx=8,dy=12,transposeLabel=capo<0?`；标准调弦降 ${Math.abs(capo)} 半音`:capo?`；品位相对Capo ${capo}`:'';let content=`<g class="guitar-chord-diagram" role="img" aria-label="${esc(label)} 吉他参考指法"><title>${esc(label)}：6弦→1弦 ${shape.frets.map(f=>f<0?'×':f).join(' ')}；手指1食指/2中指/3无名指/4小指${transposeLabel}${shape.omitted.length?'；扩展和弦省略部分内声部':''}。参考指法需试听。</title>`;
  for(let i=0;i<6;i++)content+=`<line x1="${left+i*dx}" x2="${left+i*dx}" y1="${top}" y2="${top+4*dy}" stroke="#416d63" stroke-width=".8"/>`;
  for(let f=0;f<=4;f++)content+=`<line x1="${left}" x2="${left+5*dx}" y1="${top+f*dy}" y2="${top+f*dy}" stroke="#416d63" stroke-width="${f===0&&shape.baseFret===1?2: .8}"/>`;
  if(shape.baseFret>1)content+=`<text x="${x}" y="${top+9}" font-size="8">${shape.baseFret}</text>`;
  if(shape.barre){const py=top+(shape.barre.fret-shape.baseFret+.5)*dy;content+=`<line x1="${left+shape.barre.from*dx}" x2="${left+shape.barre.to*dx}" y1="${py}" y2="${py}" stroke="#416d63" stroke-width="7" stroke-linecap="round"/>`;}
  shape.frets.forEach((f,i)=>{const px=left+i*dx;if(f<=0)content+=`<text x="${px}" y="${top-4}" font-size="10" text-anchor="middle">${f<0?'×':'○'}</text>`;else{const py=top+(f-shape.baseFret+.5)*dy;content+=`<circle cx="${px}" cy="${py}" r="4.4" fill="#416d63"/><text x="${px}" y="${py+2.7}" font-size="7" fill="#fff" text-anchor="middle">${shape.fingers[i]}</text>`;}});
- content+=`<text x="${left}" y="${top+4*dy+10}" font-size="7">6弦 → 1弦${capo?' · 相对Capo':''}</text></g>`;return content;
+ content+=`<text x="${left}" y="${top+4*dy+10}" font-size="7">6弦 → 1弦${capo<0?` · 降${Math.abs(capo)}半音`:capo?' · 相对Capo':''}</text></g>`;return content;
 }
 
 export function guitarLibrarySvg(key='C'){

@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 import numpy as np
 from scipy.signal import resample_poly, find_peaks
-import soundfile as sf
 from math import gcd
 
 
@@ -222,7 +221,25 @@ def stable_grid(rhythm, bass_envelope=None, bass_step=None, meter=4, pulse_envel
             'warning': '不足10小节，暂按较短片段估计固定时长' if measures < 10 else '固定时长来自连续10–20小节；强拍相位仍需试听确认'}
 
 
+def preferred_metrical_bpm(rhythm, meter=4):
+    """Prefer the slower 4/4 level when repeated downbeats span two fast bars."""
+    stable = rhythm.get('stableGrid') or {}
+    bpm = stable.get('bpm')
+    downbeats = rhythm.get('downbeatTimes') or []
+    if meter != 4 or not bpm or bpm < 100 or len(downbeats) < 7:
+        return None
+    bar = stable.get('barDuration') or 60 / bpm * meter
+    tolerance = max(.14, bar * .12)
+    intervals = [second-first for first, second in zip(downbeats, downbeats[1:])
+                 if .75*bar <= second-first <= 2.25*bar]
+    double_bars = sum(abs(interval-2*bar) <= tolerance for interval in intervals)
+    # The intro may have irregular or missing downbeats. Use the full track,
+    # and require repeated two-bar spacing to dominate ordinary bar spacing.
+    return round(bpm / 2, 4) if double_bars >= 4 and double_bars / max(1, len(intervals)) >= .6 else None
+
+
 def analyze_files(folder, meter=4):
+    import soundfile as sf
     folder = Path(folder)
     source = 'mix'
     samples, sr = sf.read(folder / 'clip.wav', dtype='float32', always_2d=True)
@@ -281,6 +298,13 @@ def analyze_files(folder, meter=4):
     stable = stable_grid(rhythm, bass_env, bass_step, meter=meter, pulse_envelope=pulse_env, pulse_step=pulse_step)
     if stable:
         rhythm['stableGrid'] = stable
+        preferred = preferred_metrical_bpm(rhythm, meter)
+        if preferred:
+            rhythm['preferredBpm'] = preferred
+            rhythm['estimatedBpm'] = round(preferred, 2)
+            rhythm['tempoAmbiguous'] = True
+            rhythm['candidates'] = [{'bpm': round(preferred, 2), 'score': 1.3, 'type': 'opening-downbeat-level', 'derivedFrom': stable['bpm']}, *rhythm.get('candidates', [])]
+            rhythm['warning'] += '；开头连续强拍跨两个快速候选小节，已选较慢的四拍层级'
     return rhythm
 
 

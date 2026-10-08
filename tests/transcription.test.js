@@ -12,5 +12,13 @@ test('无可靠旋律和过长结果明确拒绝，不编造或截断音符',()=
 
 test('automatic initial score uses terminal Do instead of a fixed C and preserves actual pitches',()=>{
  const input=result([[60,0,.5],[64,.5,1],[67,1,1.5],[65,1.5,2.3],[66,2.3,2.35]]);const s=transcriptionToScore(input);
- assert.equal(s.key,'F');assert.equal(s.keyMap.source,'terminal-note-first-v1');assert.equal(s.keyMap.status,'suggested');assert.equal(s.keyMap.locked,false);assert.equal(s.transcription.doEvidence.terminal.midi,65);assert.ok(s.transcription.warnings.some(w=>w.includes('末音优先')));for(const n of s.measures.flatMap(m=>m.notes).filter(n=>n.degree))assert.equal(noteMidi(n,s),n.pitchMidi);
+ assert.equal(s.key,'F');assert.equal(s.keyMap.source,'ending-evidence-v2');assert.equal(s.keyMap.status,'suggested');assert.equal(s.keyMap.locked,false);assert.equal(s.transcription.doEvidence.terminal.midi,65);assert.ok(s.transcription.warnings.some(w=>w.includes('综合音阶')));for(const n of s.measures.flatMap(m=>m.notes).filter(n=>n.degree))assert.equal(noteMidi(n,s),n.pitchMidi);
+});
+
+test('independent short contour candidates are retained in the score with their uncertainty and evidence',()=>{
+ const input=result([[58,41.92,42.032],[57,42.032,42.256],[60,42.288,42.56]]);
+ input.notes[0]={...input.notes[0],confidence:0,pitchStatus:'uncertain',reviewRequired:true,reviewReason:'short-contour-note',independentEvidence:{kind:'short-attack-crest',frameCount:5}};
+ const s=transcriptionToScore(input,{key:'C',bpm:68,rhythmMode:'stable',barAnchor:41.42});
+ const first=s.measures.flatMap(m=>m.notes).find(n=>n.pitchMidi===58);
+ assert.ok(first);assert.equal(first.reviewReason,'short-contour-note');assert.equal(first.independentEvidence.frameCount,5);
 });

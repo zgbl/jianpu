@@ -26,14 +26,27 @@ export function timedLyricLayout(score,plan){
  const alignment=score.lyricAlignment;
  const chars=alignment?.displayMode==='characters'?alignment.characters:alignment?.pending||[];
  const segments=chars?.length?audioScoreTimeline(score,0,plan):[];
+ const anticipated=score.measures.flatMap(m=>m.notes).filter(n=>n.degree&&n.timingAlignment?.boundarySelected&&n.sourceTime<n.gridTimeStart);
  const groups=new Map(),placed=[],minimumMeasureWidths=new Map();
  const verse=alignment?.verse||1;
+ const firstSung=plan.measures.flatMap(m=>m.notes).find(p=>p.n.degree&&Number.isFinite(p.n.sourceTime));
  for(const c of chars||[]){
-  if(!Number.isFinite(c.start)||!segments.length)continue;
+  if(c.timingUnresolved&&!c.placement?.manual||!Number.isFinite(c.start)||!segments.length)continue;
   const seg=segments.find(s=>s.start<=c.start&&s.end>c.start)||
    segments.reduce((best,s)=>Math.min(Math.abs(c.start-s.start),Math.abs(c.start-s.end))<Math.min(Math.abs(c.start-best.start),Math.abs(c.start-best.end))?s:best);
-  const p=c.placement?plan.positions.get(c.placement.noteId):null,position=p||plan.positions.get(seg.id),measure=plan.measures[position.mi];
-  const x=p?p.x+(c.placement.offsetX||0):seg.x+14+(seg.toX-seg.x)*Math.max(0,Math.min(1,(c.start-seg.start)/(seg.end-seg.start||1)));
+  // The acoustic character may precede the bar along with a vocal anticipation.
+  // Follow the explicit notation decision without rewriting alignment evidence.
+  const entry=anticipated.find(n=>c.start>=n.sourceTime&&c.start<n.gridTimeStart&&c.start<n.sourceEnd);
+  let p=c.placement?plan.positions.get(c.placement.noteId):entry?plan.positions.get(entry.id):null;
+  // A lyric aligner can lead the first pitched onset by a fraction of a second.
+  // Never let that timing error put a sung syllable into a synthetic 0000 intro.
+  if(!p&&firstSung&&c.start<firstSung.n.sourceTime&&plan.measures[plan.positions.get(seg.id)?.mi]?.m.introPlaceholder){
+   if(firstSung.n.sourceTime-c.start>.6)continue;
+   p=firstSung;
+  }
+  const position=p||plan.positions.get(seg.id);if(!position)continue;
+  const measure=plan.measures[position.mi];
+  const x=p?p.x+(c.placement?.offsetX||0):seg.x+14+(seg.toX-seg.x)*Math.max(0,Math.min(1,(c.start-seg.start)/(seg.end-seg.start||1)));
   const item={c,x,preferredX:x,mi:position.mi,row:position.row,baseline:position.y,verse,y:position.y+62+(verse-1)*26,collision:false};
   placed.push(item);if(!groups.has(measure.m.id))groups.set(measure.m.id,[]);groups.get(measure.m.id).push(item);
  }

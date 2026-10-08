@@ -4,11 +4,11 @@
 <body>
  <header class="workspace-header">
   <a class="workspace-brand" href="/" aria-label="谱间主页"><span>谱</span>谱间<small>音乐工作台</small></a>
-  <nav aria-label="工作方式"><button id="tabTranscribe" aria-selected="true">听歌识谱</button><button id="tabImage">本机图片识谱</button><button id="tabModelImage">大模型读谱导入</button><button id="tabCompare">双谱校对</button><button id="tabAudioDebug">音频调试</button></nav>
+  <nav aria-label="主导航"><a class="nav-library" href="/library.html">乐谱库</a><button id="tabTranscribe" aria-selected="true">听歌识谱</button><button id="tabImage">本机图片识谱</button><button id="tabModelImage">大模型读谱导入</button><button id="tabCompare">双谱校对</button><button id="tabAudioDebug">音频调试</button></nav>
   <span class="workspace-purpose">听歌识别 · 原地编辑 · 对照校准</span>
   <span class="local-label">音频留在本机</span>
  </header>
- <section class="project-bar" aria-label="工程操作"><div class="project-identity"><strong id="projectName">歌曲工程</strong><span id="projectStatus" role="status">正在加载工程…</span></div><div class="project-actions"><button id="projectNew">新建工程</button><button id="projectOpen">打开 / 最近工程</button><button id="projectHistory" hidden>修订版本</button><button id="projectSaveAs">另存为</button><button id="projectSave" class="primary">保存工程</button></div></section>
+ <section class="project-bar" aria-label="工程操作"><div class="project-identity"><strong id="projectName">歌曲工程</strong><span id="projectStatus" role="status">正在加载工程…</span></div><div class="project-actions"><button id="projectNew">新建工程</button><button id="projectOpen">打开 / 最近工程</button><button id="projectHistory" hidden>修订版本</button><button id="projectPublish">保存成品到乐谱库</button><button id="projectSaveAs">另存为</button><button id="projectSave" class="primary">保存工程</button></div></section>
  <main>
   <section id="transcribePanel"><iframe id="transcribeFrame" title="歌曲识别与简谱编辑工作台" allow="autoplay; display-capture"></iframe></section>
   <section id="scoreImagePanel" hidden><iframe id="scoreImageFrame" title="图片简谱识别与导入"></iframe></section>

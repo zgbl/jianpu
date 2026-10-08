@@ -27,7 +27,7 @@ test('gate bands preserve independent failed thresholds and old missing source e
 
 test('terminal outside plausible scales is rejected while reliable terminal and skipped tail remain inspectable',()=>{
  const notes=[...song(0),{midi:69,start:60,end:61,coreStart:60.2,coreEnd:60.8,pitchCenterMidi:69.05,confidence:.9},{midi:70,start:61,end:61.08,confidence:1},{midi:71,start:61.1,end:62,coreStart:61.2,coreEnd:61.8,pitchStatus:'uncertain',confidence:1}];
- const r=rankDo(notes);assert.equal(r.candidates[0].key,'C');assert.equal(r.terminalRejected,true);assert.equal(r.distributionWinner,'C');assert.equal(r.conflict,false);assert.equal(r.terminal.midi,69);assert.equal(r.terminal.kind,'stable-core');assert.equal(r.terminal.skippedTrailing,1);const c=r.candidates.find(c=>c.key==='C');assert.equal(c.endRole,6);assert.equal(c.cadence,0);
+ const r=rankDo(notes);assert.equal(r.candidates[0].key,'C');assert.equal(r.terminalRejected,true);assert.equal(r.distributionWinner,'C');assert.equal(r.conflict,false);assert.equal(r.terminal.midi,69);assert.equal(r.terminal.kind,'stable-core');assert.equal(r.terminal.skippedTrailing,1);const c=r.candidates.find(c=>c.key==='C');assert.equal(c.endRole,6);assert.equal(c.cadence,.032);
 });
 test('pentatonic melody without 4 or 7 is not penalized for absent notes',()=>{
  const notes=[65,67,69,72,74,65].map((midi,i)=>({midi,start:i,end:i+.7,confidence:1}));const r=rankDo(notes);assert.equal(r.candidates[0].key,'F');assert.equal(r.candidates[0].inScale,1);assert.equal(r.candidates[0].accidentalShare,0);assert.equal(r.supported,5);assert.equal(r.candidates.find(c=>c.key==='C').inScale,1);

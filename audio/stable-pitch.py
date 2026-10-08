@@ -6,7 +6,7 @@ is deliberately exposed for calibration; these defaults are not measured accurac
 import numpy as np
 from importlib import import_module
 
-VERSION = 'vocal-notes-v3.6'
+VERSION = 'vocal-notes-v3.9'
 DEFAULTS = dict(shortCoreWindow=.048, coreWindow=.080, vibratoWindow=.208, coreSpread=.32,
                 coreDrift=.22, coreTolerance=.45, minCore=.048,
                 seedVoicing=.65, continuationVoicing=.35, missingGap=.096,
@@ -80,7 +80,8 @@ def absorb_noise_fragments(events, step, cfg, onsets, energy):
     events = sorted(events, key=lambda e:e['start'])
     absorbed = []
     for fragment in list(events):
-        if fragment['end']-fragment['start'] > .12+1e-8 or fragment['pitchStatus'] != 'uncertain':
+        if (fragment.get('independentEvidence') or
+                fragment['end']-fragment['start'] > .12+1e-8 or fragment['pitchStatus'] != 'uncertain'):
             continue
         # An off-center but stable short note still has independent evidence.
         if fragment['coreStart'] is not None:
@@ -124,6 +125,64 @@ def absorb_noise_fragments(events, step, cfg, onsets, energy):
         events.remove(fragment)
         absorbed.append(record)
     return events,absorbed
+
+
+
+def split_short_attack_peaks(events, raw, valid, prob, step):
+    """Keep a supported rise-and-fall crest outside the destination core.
+
+    This is a separate *uncertain* event, not a stable core or a reference-score
+    truth. No beat/key is consulted and the observed crest is never raised to
+    a wished-for pitch. Three contiguous near-peak observations are required.
+    """
+    output, proposals = [], []
+    for main in events:
+        if (main['pitchStatus'] != 'candidate' or main.get('recoveryReason')
+                or main['coreStart'] is None or main['coreEnd']-main['coreStart'] < .08
+                or not any(o['type']=='scoop' for o in main['ornaments'])):
+            output.append(main); continue
+        a=max(0,round(max(main['start'],main['coreStart']-.5)/step))
+        b=min(len(raw),round(main['coreStart']/step))
+        indices=np.flatnonzero(valid[a:b])+a
+        if len(indices)<5:
+            output.append(main); continue
+        peak=int(indices[np.argmax(raw[indices])]);center=main['pitchCenterMidi']
+        prominence=float(raw[peak]-center)
+        if (peak==indices[0] or peak==indices[-1] or not .7<=prominence<=3
+                or raw[peak]-raw[indices[0]]<.7 or raw[peak]-raw[indices[-1]]<.5):
+            output.append(main); continue
+        lo=hi=peak
+        while lo>a and valid[lo-1] and raw[peak]-raw[lo-1]<=.35: lo-=1
+        while hi+1<b and valid[hi+1] and raw[peak]-raw[hi+1]<=.35: hi+=1
+        if hi-lo+1<3 or (hi-lo+1)*step<.048-1e-8:
+            output.append(main); continue
+        peak_center=median(raw[lo:hi+1],prob[lo:hi+1])
+        target=int(np.floor(peak_center+.5))
+        if target==main['midi']:
+            output.append(main); continue
+        cut=round((hi+1)*step,4)
+        begin=main['evidenceFrameRange'][0]
+        evidence=dict(kind='short-attack-crest',peakTime=round(peak*step,4),
+                      peakMidi=round(float(raw[peak]),4),nearPeakStart=round(lo*step,4),
+                      nearPeakEnd=cut,frameCount=hi-lo+1,prominenceCents=round(prominence*100,1))
+        short=dict(start=main['start'],end=cut,performanceStart=main['start'],performanceEnd=cut,
+                   midi=target,pitchCenterMidi=round(peak_center,4),pitchStatus='uncertain',
+                   coreStart=None,coreEnd=None,boundaryStatus='uncertain',confidence=0,
+                   voicingProbability=round(float(np.mean(prob[lo:hi+1])),3),
+                   pitchReliability=None,sourceReliability=None,periodicity=None,
+                   confidenceMeaning='short contour proposal; not pitch correctness probability',
+                   centsDeviation=round(abs(peak_center-target)*100,1),
+                   coreDispersionCents=None,evidenceFrameRange=[begin,hi+1],ornaments=[],
+                   independentEvidence=evidence,reviewRequired=True,reviewReason='short-contour-note',
+                   algorithmVersion=VERSION)
+        # Partition performance timing, leaving the dominant core unchanged.
+        main['start']=main['performanceStart']=cut
+        main['evidenceFrameRange'][0]=hi+1
+        main['ornaments']=[{**o,'start':max(cut,o['start'])} for o in main['ornaments'] if o['end']>cut]
+        output.extend([short,main])
+        proposals.append(dict(start=short['start'],end=cut,midi=target,**evidence))
+    return output,proposals
+
 
 
 def contextual_pitch_targets(events):
@@ -444,14 +503,16 @@ def extract_events(f0, voiced, voicing_probability, hop, sr, onset_times=(), ene
             attached += 1
         else:
             events.append(event)
+    events, short_contour_notes = split_short_attack_peaks(events, raw, valid, prob, step)
     events, noise_fragments = absorb_noise_fragments(events, step, cfg, onsets, energy)
     target_proposals = contextual_pitch_targets(events)
     for event in events:
-        if event.get('absorbedFragments') or event.get('targetReason'):
+        if event.get('absorbedFragments') or event.get('targetReason') or event.get('independentEvidence'):
             begin,finish=event['evidenceFrameRange'];labels[begin:finish]=event['midi']
     return events, labels, dict(version=VERSION,config=cfg,cores=all_cores,filledDropouts=filled,
                                absorbedTransitions=transitions,
                                absorbedNoiseFragments=noise_fragments,
+                               preservedShortContourNotes=short_contour_notes,
                                contextualPitchProposals=target_proposals,
                                uncertainEvents=sum(e['pitchStatus']=='uncertain' for e in events),
                                confidenceMeaning='voicingProbability is not pitch correctness probability',

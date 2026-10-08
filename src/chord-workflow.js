@@ -21,8 +21,8 @@ export function createChordWorkflow({getScore,getContext,getDuration=()=>null,ge
    if(!score){feedback('请先生成或打开乐谱，再按谱配和弦。',{error:true});return;}
    feedback('正在按当前乐谱的旋律、时值和小节配和弦…',{busy:true});
    try{const next=harmonizeScore(score,{granularity:getGranularity(),color:getColor(),seventhLimit:getSeventhLimit()});if(!next.chords.length)throw Error('当前谱面没有可用旋律音符，请补正问号或全休止小节。');if(applyScore(next,'已按当前乐谱配和弦')===false)throw Error('请先完成当前谱面编辑。');const assigned=new Set(next.chords.map(c=>c.measureId)),missing=next.measures.length-assigned.size;const matches=[...new Set((next.chordConfiguration.progressionMatches||[]).map(m=>m.degrees.join('')))];feedback(`已按当前乐谱配入 ${next.chords.length} 个和弦，覆盖 ${assigned.size}/${next.measures.length} 个小节${missing?`；${missing} 个小节没有可用旋律，未推测和弦`:''}。${matches.length?`命中完整进行：${matches.join('、')}。`:'未命中完整流行模板，按旋律匹配配置。'}扩展和弦实际占比 ${Math.round((next.chordConfiguration.colorReport?.actual||0)*100)}%（偏好 ${next.chordConfiguration.color||0}%，不含人工和弦）。普通和弦中七和弦 ${next.chordConfiguration.seventhReport?.seventhChords||0}/${next.chordConfiguration.seventhReport?.ordinaryChords||0}，实际占比 ${Math.round((next.chordConfiguration.seventhReport?.actual||0)*100)}%（上限 ${next.chordConfiguration.seventhLimit??30}%）。人工和弦保留，可撤销；这是配法建议，需试听校对。`,{progress:1});}
-   catch(e){feedback(`按谱配和弦失败：${e.message}`,{error:true});}
-   return;
+   catch(e){feedback(`按谱配和弦失败：${e.message}`,{error:true});return false;}
+   return true;
   }
   if(!score||!context?.runId){feedback('请先打开带有音频识别结果的工程，再识别和弦。',{error:true});return;}
   const identity=JSON.stringify(context),started=Date.now();let phase='正在提交和弦分析任务',progress=null;

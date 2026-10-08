@@ -22,7 +22,7 @@
 | 连线 | `spans` 元素为 `{ "id": "s001", "type": "tie" 或 "slur", "from": "音符ID", "to": "音符ID" }`。延音线 `tie` 只连**相邻、同音高、同八度、同升降号**的两个音符；圆滑线用 `slur`，可以跨其他音符或小节。 |
 | 歌词 | `lyrics` 元素为 `{ "noteId": "音符ID", "verse": 1, "text": "字" }`。同一音符、同一段只能有一项。多段歌词用 `verse: 1–4`；字在图上对应哪个数字，就引用哪个数字的 ID。休止符、延音线的后续音通常不挂新字。只有图片确实显示数个字唱在同一个音符上，才把它们放在同一个 `text`。 |
 | 和弦 | 可选 `chords` 元素为 `{ "measureId": "小节ID", "label": "G", "source": "image" }`。`label` 使用实际发声和弦，如 `C`、`G7`、`Am`、`Fmaj7`、`G/B`，包括斜杠低音。不要根据流行和弦进行自行配和弦。 |
-| 吉他 | 有明确指型与 Capo 时，可选 `guitarNotation: { "version": 1, "mode": "fingering", "shapeKey": "C" 或 "G", "capo": 0–12 }`。`key` 和存储的和弦仍是实际发声调/和弦；该字段只控制指型显示。无可靠信息就省略。 |
+| 吉他 | 有明确指型与 Capo/调弦移调时，可选 `guitarNotation: { "version": 1, "mode": "fingering", "shapeKey": "C" 或 "G", "capo": -12–12 }`。负值表示标准调弦整体降调；`key` 和存储的和弦仍是实际发声调/和弦；该字段只控制指型显示。无可靠信息就省略。 |
 | 复核 | 可选 `visionReview: { "sourcePages": 图片张数, "issues": [...] }`。此字段是本提示词要求的审校记录，项目当前不会拿它推断音符；每项建议写 `page`、`measure`、`kind`、`description`。不确定的内容不能伪装成确定读数。 |
 
 `id` 不必是真 UUID，`m001`、`n001_01`、`s001` 这样的稳定字符串即可，但**所有小节、音符和连线的 ID 必须互不重复**。歌词与和弦引用的 ID 必须确实存在。`pitchMidi`、`sourceTime` 是录音识别字段，纯图片识谱**不要填写**；不要编造 BPM 或音频时间。

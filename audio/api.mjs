@@ -7,6 +7,7 @@ import {resolve} from 'node:path';
 import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
 import {validate} from '../src/model.js';
+import {localPageRequest} from './local-origin.mjs';
 const LIMIT=100*1024*1024;
 const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 export function createAudioAPI(root,{projects=null}={}){
@@ -41,8 +42,7 @@ export function createAudioAPI(root,{projects=null}={}){
  async function handle(req,res,url){
   if(!url.pathname.startsWith('/api/audio/'))return false;
   try{
-   if(!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(req.headers.host||'')||req.headers['sec-fetch-site']==='cross-site'){json(res,403,{error:'音频接口仅供本机页面使用。'});return true;}
-   if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`){json(res,403,{error:'仅允许当前本地页面发起请求。'});return true;}
+   if(!localPageRequest(req)){json(res,403,{error:'音频接口仅供本机或局域网同源页面使用。'});return true;}
    if(url.pathname==='/api/audio/health'&&req.method==='GET'){const base=await readiness(),six=await readiness('htdemucs_6s');const lyricsReady=await access(resolve(root,'.cache/lyrics-ready.json')).then(()=>access(resolve(root,'.cache/whisper/small.pt'))).then(()=>true,()=>false);json(res,200,{...base,lyricsReady,pitchAlgorithms:['stable-v3','legacy-v2'],models:{htdemucs:base.ready,htdemucs_6s:six.ready}});return true;}
    if(url.pathname==='/api/audio/rhythm'&&req.method==='POST'){
     if(rhythmBusy){json(res,409,{error:'节拍分析正在进行，请稍候'});return true;}

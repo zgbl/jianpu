@@ -6,9 +6,10 @@ import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
 import {spawn} from 'node:child_process';
 import {validate} from '../src/model.js';
+import {localPageRequest} from './local-origin.mjs';
 const newScore=title=>validate({format:'jianpu-melody',version:2,title:String(title).slice(0,200),key:'C',meter:[4,4],measures:Array.from({length:4},()=>({id:randomUUID(),notes:[],repeatStart:false,repeatEnd:false})),spans:[],lyrics:[]});
 const ID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const ASSET=/^(audio\/original\.(mp3|wav|m4a|flac|ogg|audio)|runs\/[a-f0-9-]{36}\/(clip\.wav|vocals\.wav|drums\.wav|bass\.wav|other\.wav|guitar\.wav|piano\.wav|stems\.json|pitch-observations\.json|melody-candidates-v3\.json|key-analysis\.json|lyrics\.json|lyrics-alignment\.json|intro-melody\.json|chords\.json|result\.json|recognized\.jpu|params\.json))$/;
+const ASSET=/^(audio\/original\.(mp3|wav|m4a|flac|ogg|mp4|mov|m4v|audio)|runs\/[a-f0-9-]{36}\/(clip\.wav|vocals\.wav|drums\.wav|bass\.wav|other\.wav|guitar\.wav|piano\.wav|stems\.json|pitch-observations\.json|melody-candidates-v3\.json|key-analysis\.json|lyrics\.json|lyrics-alignment\.json|intro-melody\.json|chords\.json|result\.json|recognized\.jpu|params\.json))$/;
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 const error=(message,status=400)=>Object.assign(Error(message),{status});
 const plain=value=>value&&typeof value==='object'&&!Array.isArray(value);
@@ -38,7 +39,7 @@ export function createProjectStore(root){
  async function register(p,path){const info=await digest(resolve(folder(p.id),path));p.assets=p.assets.filter(a=>a.path!==path);p.assets.push({path,...info});}
  async function addSource(id,req,name){return serial(id,async()=>{
   const p=await read(id);if(p.source)throw error('工程已有原曲，请新建工程导入另一首歌',409);
-  const ext=extname(name||'').toLowerCase(),path='audio/original'+(['.mp3','.wav','.m4a','.flac','.ogg'].includes(ext)?ext:'.audio');await mkdir(resolve(folder(id),'audio'),{recursive:true});const tmp=resolve(folder(id),path+'.tmp');await upload(req,tmp,100*1024*1024);await rename(tmp,resolve(folder(id),path));await register(p,path);p.source={path,originalName:String(name||'音频').slice(0,200)};return write(p);
+  const ext=extname(name||'').toLowerCase(),video=['.mp4','.mov','.m4v'].includes(ext),path='audio/original'+(['.mp3','.wav','.m4a','.flac','.ogg','.mp4','.mov','.m4v'].includes(ext)?ext:'.audio');await mkdir(resolve(folder(id),'audio'),{recursive:true});const tmp=resolve(folder(id),path+'.tmp');await upload(req,tmp,(video?300:100)*1024*1024);await rename(tmp,resolve(folder(id),path));await register(p,path);p.source={path,originalName:String(name||'音频').slice(0,200)};return write(p);
  });}
  async function patch(id,data){return serial(id,async()=>{
   const p=await read(id);if(data.revision!==p.revision)throw error('工程版本已变化，请重新打开；未保存的编辑已保留在当前页面',409);
@@ -89,7 +90,7 @@ export function createProjectStore(root){
   res.writeHead(range?206:200,{'Content-Type':type,'Cache-Control':'no-store','Accept-Ranges':'bytes','Content-Length':end-start+1,...(range?{'Content-Range':`bytes ${start}-${end}/${info.size}`}:{})});await pipeline(createReadStream(path,{start,end}),res);
  }
  async function handle(req,res,url){if(!url.pathname.startsWith('/api/projects'))return false;try{
-  if(!/^(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(req.headers.host||'')||req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`)throw error('工程接口仅供当前本机页面使用',403);
+  if(!localPageRequest(req))throw error('工程接口仅供本机或局域网同源页面使用',403);
   if(url.pathname==='/api/projects'&&req.method==='GET'){json(res,200,await list());return true;}
   if(url.pathname==='/api/projects'&&req.method==='POST'){json(res,201,await create((await body(req)).name));return true;}
   if(url.pathname==='/api/projects/import'&&req.method==='POST'){json(res,201,await importPackage(req));return true;}
@@ -101,7 +102,7 @@ export function createProjectStore(root){
   if(action==='source'&&req.method==='PUT'){json(res,200,await addSource(id,req,url.searchParams.get('name')));return true;}
   if(action==='adopt'&&req.method==='POST'){json(res,200,await adopt(id,(await body(req)).runId));return true;}
   if(action==='restore'&&req.method==='POST'){json(res,200,await restore(id,(await body(req)).historyId));return true;}
-  if(action==='asset'&&req.method==='GET'){const p=await read(id),path=url.searchParams.get('path');if(!p.assets.some(a=>a.path===path)||!ASSET.test(path))throw error('没有这个工程资产',404);await stream(req,res,resolve(folder(id),path),path.endsWith('.wav')?'audio/wav':path.endsWith('.mp3')?'audio/mpeg':path.endsWith('.m4a')?'audio/mp4':path.endsWith('.flac')?'audio/flac':path.endsWith('.ogg')?'audio/ogg':path.endsWith('.json')||path.endsWith('.jpu')?'application/json':'application/octet-stream');return true;}
+  if(action==='asset'&&req.method==='GET'){const p=await read(id),path=url.searchParams.get('path');if(!p.assets.some(a=>a.path===path)||!ASSET.test(path))throw error('没有这个工程资产',404);await stream(req,res,resolve(folder(id),path),path.endsWith('.wav')?'audio/wav':path.endsWith('.mp3')?'audio/mpeg':path.endsWith('.m4a')?'audio/mp4':path.endsWith('.mp4')||path.endsWith('.m4v')?'video/mp4':path.endsWith('.mov')?'video/quicktime':path.endsWith('.flac')?'audio/flac':path.endsWith('.ogg')?'audio/ogg':path.endsWith('.json')||path.endsWith('.jpu')?'application/json':'application/octet-stream');return true;}
   if(action==='export'&&req.method==='GET'){const exported=await exportPackage(id);try{const info=await stat(exported.path);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':info.size,'X-Project-Revision':String(exported.revision),'Content-Disposition':`attachment; filename="project.jpp"; filename*=UTF-8''${encodeURIComponent(exported.name+'.jpp')}`});await pipeline(createReadStream(exported.path),res);}finally{await exported.cleanup();}return true;}
   throw error('不支持这个工程操作',405);
  }catch(e){if(!res.headersSent)json(res,e.status||400,{error:e.message});else res.destroy();}return true;}

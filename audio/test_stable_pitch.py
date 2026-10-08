@@ -11,6 +11,34 @@ class StablePitch(unittest.TestCase):
         e,_,_=self.decode(np.r_[np.linspace(60,64,18),np.full(30,64.)])
         self.assertEqual([n['midi'] for n in e],[64]);self.assertEqual(e[0]['start'],0)
         self.assertGreater(e[0]['coreStart'],.2);self.assertEqual(e[0]['ornaments'][0]['type'],'scoop')
+    def test_short_attack_crest_is_split_without_a_stable_platform(self):
+        pitches=np.r_[[56.998,57.498,57.798,57.898,58.098,58.098,57.898,57.598,57.398],
+                      [57.198,57.198,57.098,57.098,57.098,56.998,56.998,56.998,56.898,56.698,56.498,56.198]]
+        events,labels,d=self.decode(pitches,energy=np.ones(len(pitches)))
+        self.assertEqual([e['midi'] for e in events],[58,57])
+        short,main=events
+        self.assertEqual(short['pitchStatus'],'uncertain');self.assertEqual(short['confidence'],0)
+        self.assertIsNone(short['coreStart']);self.assertEqual(short['reviewReason'],'short-contour-note')
+        self.assertEqual(short['independentEvidence']['frameCount'],5)
+        self.assertEqual(short['end'],main['start']);self.assertEqual(main['coreStart'],.144)
+        self.assertEqual(len(d['preservedShortContourNotes']),1)
+        self.assertEqual(d['absorbedNoiseFragments'],[])
+        self.assertTrue(np.all(labels[:7]==58))
+
+    def test_single_frame_spike_is_not_promoted_to_a_short_note(self):
+        events,_,d=self.decode(np.r_[[57]*4,[58.1],[57]*25],energy=np.ones(30))
+        self.assertEqual(d['preservedShortContourNotes'],[])
+        self.assertNotIn('short-contour-note',[e.get('reviewReason') for e in events])
+
+    def test_independent_short_fragment_cannot_be_absorbed_again(self):
+        main=dict(start=.08,end=.48,performanceStart=.08,performanceEnd=.48,midi=57,
+                  pitchCenterMidi=57.1,pitchStatus='candidate',coreStart=.112,coreEnd=.464,evidenceFrameRange=[5,30])
+        short=dict(start=0,end=.08,performanceStart=0,performanceEnd=.08,midi=58,
+                   pitchCenterMidi=58.1,pitchStatus='uncertain',coreStart=None,coreEnd=None,
+                   evidenceFrameRange=[0,5],independentEvidence={'kind':'short-attack-crest'})
+        events,absorbed=module.absorb_noise_fragments([short,main],.016,module.DEFAULTS,[],np.ones(40))
+        self.assertEqual(len(events),2);self.assertEqual(absorbed,[])
+
     def test_semitone_legato_and_octave_remain_real(self):
         e,_,_=self.decode([60]*16+[61]*8+[73]*16)
         self.assertEqual([n['midi'] for n in e],[60,61,73])

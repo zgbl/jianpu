@@ -12,6 +12,13 @@ export function chordInfo(label){
  if(extended)intervals.push(2);if(/11|13/.test(suffix))intervals.push(5);if(/13/.test(suffix))intervals.push(9);
  return {root,suffix,minor,extended,seventhPc:hasSeventh?(root+intervals[3])%12:null,extensionPcs:extended?intervals.slice(hasSeventh?4:3).map(i=>(root+i)%12):[],pcs:intervals.map(i=>(root+i)%12)};
 }
+// Nearby local scores are alternatives, not probabilities or original-song truth.
+export function chordAlternatives(options,selected,{margin=.12}={}){
+ const valid=options.filter(c=>c.label!==selected&&Number.isFinite(c.value)&&guitarFingering(c.label));
+ const best=Math.max(-Infinity,...options.filter(c=>Number.isFinite(c.value)).map(c=>c.value));
+ const unique=new Map();for(const c of valid.filter(c=>best-c.value<=margin+1e-9&&(c.melodySupport==null||c.melodySupport>=.5)).sort((a,b)=>b.value-a.value))if(!unique.has(c.label))unique.set(c.label,c);
+ return [...unique.values()].slice(0,2).map(c=>({label:c.label,scoreGap:Math.max(0,best-c.value),melodySupport:c.melodySupport??null}));
+}
 export function configureHarmony(score,analysis){
  if(['current-score-melody-v1','current-score-melody-v2','current-score-melody-v3','current-score-melody-v4'].includes(analysis.method))return melodyHarmony(score,{granularity:analysis.granularity||'half',color:analysis.color||0,seventhLimit:analysis.seventhLimit??30});
  const doPc=PC[score.key],scale=SCALE.map(v=>(v+doPc)%12),degree=c=>SCALE.indexOf((c.root-doPc+12)%12)+1;
@@ -20,10 +27,10 @@ export function configureHarmony(score,analysis){
  for(const w of observations){
   const notes=score.measures.flatMap(m=>m.notes).filter(n=>n.degree&&Number.isFinite(n.pitchMidi)&&Number.isFinite(n.sourceTime)&&n.sourceTime>=w.start&&n.sourceTime<w.end),unique=[...new Map(notes.map(n=>[n.sourceEventId||n.id,n])).values()];
   const options=(w.candidates?.length?w.candidates:[{label:w.label,score:w.score||0}]).map(c=>{const info=chordInfo(c.label);if(!info)return null;const diatonic=info.pcs.every(pc=>scale.includes(pc));let melody=0,weight=0;for(const n of unique){const emphasis=n.sourceTime-w.start<Math.min(.5,(w.end-w.start)*.2)?2:1;const length=Math.min(1,Math.max(.05,(n.sourceEnd??n.sourceTime+.2)-n.sourceTime));weight+=emphasis*length;melody+=emphasis*length*(info.pcs.includes(n.pitchMidi%12)?1:0);}return {...c,value:c.score+.07*(diatonic?1:0)+.05*(weight?melody/weight:0)-(info.suffix.includes('7')?.025:0),diatonic,melodySupport:weight?melody/weight:null};}).filter(Boolean).sort((a,b)=>b.value-a.value).slice(0,10);
-  const next=[];for(const state of beam)for(const c of options){const run=state.last===c.label?state.run+1:1;const hold=(analysis.windowsPerMeasure||1)*2;const excess=Math.max(0,run-hold);next.push({score:state.score+c.value+transition(state.last||c.label,c.label)-.09*excess,path:[...state.path,{...w,label:c.label,score:c.score,diatonic:c.diatonic,melodySupport:c.melodySupport}],last:c.label,run});}beam=next.sort((a,b)=>b.score-a.score).slice(0,32);
+  const next=[];for(const state of beam)for(const c of options){const run=state.last===c.label?state.run+1:1;const hold=(analysis.windowsPerMeasure||1)*2;const excess=Math.max(0,run-hold);next.push({score:state.score+c.value+transition(state.last||c.label,c.label)-.09*excess,path:[...state.path,{...w,label:c.label,score:c.score,diatonic:c.diatonic,melodySupport:c.melodySupport,alternatives:chordAlternatives(options,c.label,{margin:.08})}],last:c.label,run});}beam=next.sort((a,b)=>b.score-a.score).slice(0,32);
  }
- const raw=beam[0]?.path||[],chords=[];for(const c of raw){const prev=chords.at(-1);if(prev&&prev.measureId===c.measureId&&prev.label===c.label&&Math.abs(prev.end-c.start)<.01)prev.end=c.end;else chords.push({...c,source:'automatic'});}
- return {chords,report:{version:2,do:score.key,weights:{audio:1,diatonic:.07,melody:.05,progression:.055,seventhPenalty:.025,longHoldPenalty:.09},progressions:POP_PROGRESSIONS,warning:'配法为建议，长驻和弦仅软惩罚；不能替代重拍校准或原曲核验。'}};
+ const raw=beam[0]?.path||[],chords=[];for(const c of raw){const prev=chords.at(-1);if(prev&&prev.measureId===c.measureId&&prev.label===c.label&&Math.abs(prev.end-c.start)<.01){prev.end=c.end;prev.alternatives=(prev.alternatives||[]).filter(a=>(c.alternatives||[]).some(b=>b.label===a.label));}else chords.push({...c,source:'automatic'});}
+ return {chords,report:{version:2,alternativePolicy:{maxCount:2,maxLocalScoreLoss:.08,minMelodySupport:.5},do:score.key,weights:{audio:1,diatonic:.07,melody:.05,progression:.055,seventhPenalty:.025,longHoldPenalty:.09},progressions:POP_PROGRESSIONS,warning:'配法为建议，长驻和弦仅软惩罚；不能替代重拍校准或原曲核验。'}};
 }
 
 // Harmonize the edited score in written order. Recording timestamps and cached
@@ -102,8 +109,21 @@ export function melodyHarmony(score,{granularity='half',color=0,seventhLimit=30}
   c.simplifiedFrom=c.label;c.label=c.label.match(/^[A-G](?:#|b)?/)[0]+(chordInfo(c.label).minor?'m':'');c.seventh=false;c.simplificationReason='seventh-ratio-limit';c.melodySupport=Math.max(0,c.melodySupport-(c.seventhSupport||0));
   for(let i=chords.length-1;i>0;i--){const a=chords[i-1],b=chords[i];if(a.measureId===b.measureId&&a.label===b.label&&Math.abs(a.endTick-b.startTick)<1e-6){const x=a.endTick-a.startTick,y=b.endTick-b.startTick;a.melodySupport=(x*a.melodySupport+y*b.melodySupport)/(x+y);a.endTick=b.endTick;chords.splice(i,1);}}
  }
+ // Evaluate a merged marker over its entire span. An alternative must
+ // remain competitive in every covered window, not only the first half.
+ for(const chord of chords){
+  const windows=bars.filter(b=>b.measureId===chord.measureId&&b.startTick<chord.endTick&&b.endTick>chord.startTick);
+  const labels=[...new Set(windows.flatMap(b=>b.options.map(c=>c.label)))];
+  const options=labels.flatMap(label=>{
+   const parts=windows.map(b=>({b,c:b.options.find(c=>c.label===label)}));if(!parts.length||parts.some(p=>!p.c))return [];
+   const length=parts.reduce((s,p)=>s+p.b.endTick-p.b.startTick,0);
+   return [{label,value:parts.reduce((s,p)=>s+p.c.value*(p.b.endTick-p.b.startTick),0)/length,melodySupport:parts.reduce((s,p)=>s+(p.c.melodySupport||0)*(p.b.endTick-p.b.startTick),0)/length}];
+  });
+  const eligible=options.filter(c=>windows.every(b=>Math.max(...b.options.map(o=>o.value))-b.options.find(o=>o.label===c.label).value<=.12+1e-9));
+  chord.alternatives=chordAlternatives(eligible,chord.label);
+ }
  const seventhReport={limit:seventhRatio,actual:ordinary().length?sevenths().length/ordinary().length:0,seventhChords:sevenths().length,ordinaryChords:ordinary().length,includesManual:false};
- return {chords,report:{version:1,method:'current-score-melody-v4',do:score.key,timeBase:'written-measures',granularity,seventhLimit:Math.round(seventhRatio*100),seventhReport,color:Math.round(colorPreference*100),colorReport:{target:targetRatio,preference:colorPreference,max:0.4,actual:beam[0]?.autoCount?beam[0].extendedCount/beam[0].autoCount:0,extendedSlots:beam[0]?.extendedCount||0,automaticSlots:beam[0]?.autoCount||0,includesManual:false},progressionMatches:beam[0]?.matches||[],weights:{melody:1,maxLocalScoreLoss:.18,adjacentProgression:.03,sameChord:.015,threeChordPrefix:.01,completeProgressionPerChord:.025,maxCompleteProgression:.15,chordChangeCost:.04,seventhPenalty:0,minSeventhSupport:.2,maxExtendedShare:.4,beamWidth:48},warning:'根据当前旋律、时值和小节建议和弦；配法不唯一，不等同于原曲编配。'}};
+ return {chords,report:{version:1,alternativePolicy:{maxCount:2,maxLocalScoreLoss:.12,minMelodySupport:.5,requiresEveryWindow:true},method:'current-score-melody-v4',do:score.key,timeBase:'written-measures',granularity,seventhLimit:Math.round(seventhRatio*100),seventhReport,color:Math.round(colorPreference*100),colorReport:{target:targetRatio,preference:colorPreference,max:0.4,actual:beam[0]?.autoCount?beam[0].extendedCount/beam[0].autoCount:0,extendedSlots:beam[0]?.extendedCount||0,automaticSlots:beam[0]?.autoCount||0,includesManual:false},progressionMatches:beam[0]?.matches||[],weights:{melody:1,maxLocalScoreLoss:.18,adjacentProgression:.03,sameChord:.015,threeChordPrefix:.01,completeProgressionPerChord:.025,maxCompleteProgression:.15,chordChangeCost:.04,seventhPenalty:0,minSeventhSupport:.2,maxExtendedShare:.4,beamWidth:48},warning:'根据当前旋律、时值和小节建议和弦；配法不唯一，不等同于原曲编配。'}};
 }
 export function harmonizeScore(score,options={}){
  const next=structuredClone(score),configured=melodyHarmony(score,options),manual=(score.chords||[]).filter(c=>c.source==='manual');

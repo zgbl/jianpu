@@ -2,6 +2,19 @@ import unittest
 from lyric_line_windows import clean_line, phrase_windows
 
 class PhraseWindows(unittest.TestCase):
+    def test_wrong_suffix_words_still_extend_sung_timing_window(self):
+        from lyric_line_windows import matched_search_end
+        match=dict(start=81,end=85.22,anchors={5:83.7,6:84.12,7:84.62})
+        words=[dict(text='面',start=84.62,end=85.46),dict(text='身',start=85.46,end=87.12),dict(text='上',start=87.12,end=88.82)]
+        self.assertAlmostEqual(matched_search_end('徒留我孤单在湖面成双',match,words,240,116),89.82)
+        self.assertEqual(matched_search_end('徒留我孤单在湖面成双',match,words,240,88),88)
+
+    def test_suffix_does_not_borrow_words_after_instrumental_break(self):
+        from lyric_line_windows import matched_search_end
+        match=dict(start=81,end=85.22,anchors={7:84.62})
+        end=matched_search_end('徒留我孤单在湖面成双',match,[dict(text='花已向晚',start=116,end=120)],240)
+        self.assertLess(end,90)
+
     def test_web_metadata_and_guitar(self):
         self.assertIsNone(clean_line('music163com'))
         self.assertIsNone(clean_line('我要你 百度百科'))
@@ -41,3 +54,15 @@ class ManualAnchorTests(unittest.TestCase):
         self.assertTrue(result[0]['manual'])
         self.assertTrue(result[1]['manual'])
         self.assertLess(result[0]['end'],result[1]['start'])
+
+class OrderedPhraseTests(unittest.TestCase):
+    def test_full_transcript_does_not_jump_to_last_chorus_then_back(self):
+        lines=['开头唱一句','哎呀我有点胆怯','我怕浪费情绪的错觉','哎呀我有点胆怯','最后唱一句']
+        text='开头唱一句哎呀我有点胆我怕浪费情绪的错觉哎呀我有点胆怯最后唱一句'
+        matches=phrase_windows(lines,[(c,i*.3) for i,c in enumerate(text)],ordered=True)
+        self.assertTrue(all(matches))
+        self.assertTrue(all(a['end']<=b['start'] for a,b in zip(matches,matches[1:])))
+
+    def test_missing_line_stays_missing_instead_of_reusing_earlier_words(self):
+        matches=phrase_windows(['前面这句话','后面这句话','前面这句话'],[(c,i*.3) for i,c in enumerate('前面这句话后面这句话')],ordered=True)
+        self.assertIsNone(matches[-1])

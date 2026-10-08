@@ -100,7 +100,7 @@ def main(a):
     if a.prepare:
         CACHE.mkdir(parents=True,exist_ok=True);(CACHE/'ready.json').write_text(json.dumps({'model':MODEL}));emit('中文声学对齐模型已准备',1);return
     import librosa
-    from lyric_line_windows import clean_line, phrase_windows, manual_phrase_windows
+    from lyric_line_windows import clean_line, phrase_windows, manual_phrase_windows, matched_search_end
     from opencc import OpenCC
     text=Path(a.text).read_text();convert=OpenCC('t2s').convert
     raw_lines=[s for s in text.splitlines() if s.strip()]
@@ -114,7 +114,7 @@ def main(a):
         if w.get('probability',1)<.2:continue
         chars=re.sub(r'[^\w]','',convert(w['text']))
         for i,c in enumerate(chars):source.append((c,w['start']+(w['end']-w['start'])*i/max(1,len(chars))))
-    phrase_matches=manual_phrase_windows(lines,anchor_data.get('manualAnchors',[]),phrase_windows(lines,source),duration)
+    phrase_matches=manual_phrase_windows(lines,anchor_data.get('manualAnchors',[]),phrase_windows(lines,source,ordered=True),duration)
     anchors={};offset=0
     for line,match in zip(lines,phrase_matches):
         if match:
@@ -126,8 +126,8 @@ def main(a):
     phonetic={}
     for c,token in vocab.items():
         if len(c)==1 and '\u4e00'<=c<='\u9fff':phonetic.setdefault(lazy_pinyin(c)[0],[]).append(token)
-    # Match each lyric occurrence independently: pasted web lyrics may use a
-    # different verse order. Never force their sequence into a tiny ASR gap.
+    # The complete pasted text defines occurrence order; missing lines may
+    # remain unresolved rather than stealing an earlier/later occurrence.
     groups=[];offset=0
     for li,line in enumerate(lines):
         groups.append([dict(index=li,text=line,offset=offset,known=[])])
@@ -136,7 +136,10 @@ def main(a):
         li=group[0]['index'];line=''.join(item['text'] for item in group)
         match=phrase_matches[li]
         if match:
-            start=max(0,match['start']-1);end=min(duration,match['end']+1)
+            known=match.get('anchors',{})
+            start=max(0,min(known.values())-min(known)*.65-1) if known else max(0,match['start']-1)
+            following=next((m for m in phrase_matches[li+1:] if m and m['start']>match['end']),None)
+            end=matched_search_end(line,match,words,duration,following['start'] if following else None)
         else:
             left=next((i for i in range(li-1,-1,-1) if phrase_matches[i]),-1)
             right=next((i for i in range(li+1,len(lines)) if phrase_matches[i]),len(lines))
@@ -148,6 +151,10 @@ def main(a):
             end=low+(high-low)*(before+len(line))/max(1,total)
             # Do not squeeze unsupported text into contradictory windows.
             if end-start<len(line)*.08:end=start
+        # Full pasted lyrics define order. Never decode this sentence over
+        # frames already assigned to the preceding sentence.
+        start=max(last_end,start)
+        end=max(start,end)
         windows.append(dict(lines=[item['index']+1 for item in group],start=start,end=end,matched=bool(match)))
         emit(f'声学对齐第 {li+1}–{group[-1]["index"]+1}/{len(lines)} 句',.05+.9*li/len(lines))
         chars=[dict(id=f'line-{item["index"]}-char-{i}',lineId=f'line-{item["index"]}',text=c,status='pending',timingUnresolved=True)
@@ -167,14 +174,16 @@ def main(a):
             aligned=ctc_align(acoustic,tokens,blank);step=(end-start)/len(logits)
             if aligned:
                 for c,(f,g,p) in zip(chars,aligned):
-                    c.update(start=round(start+f*step,4),end=round(start+g*step,4),confidence=p,evidence='character-or-phonetic',status='acoustic' if p>=.15 else 'pending')
+                    c.update(start=round(start+f*step,4),end=round(start+g*step,4),confidence=p,textConfidence=p,timingSource='ctc-acoustic',evidence='character-or-phonetic',status='acoustic' if p>=.15 else 'estimated')
+                    if p<.15:c['timingEstimated']=True
                     c.pop('timingUnresolved',None)
         supported_lines={}
         for item in group:
             lid=f'line-{item["index"]}';part=[c for c in chars if c['lineId']==lid]
             supported=accept_line_timing(part)
             supported_lines[lid]=supported
-        restore_estimated_timing(chars,start,end)
+        if match or end-start<=max(12,len(line)*.8):
+            restore_estimated_timing(chars,start,end)
         for item in group:
             lid=f'line-{item["index"]}';part=[c for c in chars if c['lineId']==lid]
             supported=supported_lines[lid]
@@ -184,7 +193,7 @@ def main(a):
             if timed:last_end=max(last_end,max(c['end'] for c in timed))
             line_results.append(dict(id=lid,text=item['text'],status='aligned' if supported and all(c['status']=='acoustic' for c in part) else 'mixed' if supported else 'estimated' if timed else 'pending',timingUnresolved=not timed,timingEstimated=not supported and bool(timed)))
         results.extend(chars)
-    payload=dict(version=1,text=text,model=MODEL,algorithmVersion='ctc-phrase-window-v5',audioHash=hashlib.sha256(Path(a.input).read_bytes()).hexdigest(),modelRevision=getattr(model.config,'_commit_hash',None),timeBase='clip-seconds',transcriptHash=hashlib.sha256(text.encode()).hexdigest(),lines=line_results,characters=results,searchWindows=windows,discardedTranscriptLines=discarded,warnings=['逐句匹配录音中的实际演唱位置；重复歌词分别定位，低置信时间仍需试听校对。']+([f'已排除网页来源文字：{" / ".join(discarded)}'] if discarded else []))
+    payload=dict(version=1,text=text,model=MODEL,algorithmVersion='ctc-ordered-phrase-v7',audioHash=hashlib.sha256(Path(a.input).read_bytes()).hexdigest(),modelRevision=getattr(model.config,'_commit_hash',None),timeBase='clip-seconds',transcriptHash=hashlib.sha256(text.encode()).hexdigest(),lines=line_results,characters=results,searchWindows=windows,discardedTranscriptLines=discarded,warnings=['逐句匹配录音中的实际演唱位置；重复歌词分别定位，低置信时间仍需试听校对。']+([f'已排除网页来源文字：{" / ".join(discarded)}'] if discarded else []))
     Path(a.output).write_text(json.dumps(payload,ensure_ascii=False));emit('逐字对齐完成',1)
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--prepare',action='store_true');p.add_argument('--input');p.add_argument('--output');p.add_argument('--text');p.add_argument('--anchors');a=p.parse_args()

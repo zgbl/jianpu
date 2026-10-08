@@ -1,4 +1,5 @@
 import {captureErrorMessage,capturePermissionDenied} from '../src/capture-audio.js';
+import {localPageRequest,serverDeviceRequest} from './local-origin.mjs';
 import {spawn} from 'node:child_process';import {access,mkdir,stat,readFile} from 'node:fs/promises';import {resolve} from 'node:path';import {randomUUID} from 'node:crypto';
 const send=(res,code,data)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 const stopChild=c=>{if(c?.pid>0)c.kill();};
@@ -8,8 +9,9 @@ export function createCaptureAPI(root){
  const info=j=>({id:j.id,status:j.status,message:j.message,seconds:Math.floor((Date.now()-(j.startedAt||Date.now()))/1000),bundleId:j.bundleId});
  async function handle(req,res,url){if(!url.pathname.startsWith('/api/capture/'))return false;
  try{
-  if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host||'')||req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`){send(res,403,{error:'采集仅供本机页面使用'});return true;}
-  if(url.pathname==='/api/capture/health'&&req.method==='GET'){send(res,200,{ready:await ready(),platform:process.platform,setup:'npm run audio:capture-setup'});return true;}
+  if(!localPageRequest(req)){send(res,403,{error:'采集仅供本机或局域网同源页面使用'});return true;}
+  if(url.pathname==='/api/capture/health'&&req.method==='GET'){send(res,200,{ready:serverDeviceRequest(req)&&await ready(),serverDevice:serverDeviceRequest(req),platform:process.platform,setup:'npm run audio:capture-setup'});return true;}
+  if(!serverDeviceRequest(req)){send(res,403,{error:'只能录制当前客户端设备；服务器 App 采集仅限服务器本机页面'});return true;}
   if(url.pathname==='/api/capture/apps'&&req.method==='POST'){
    if(!await ready())throw Error('请先运行 npm run audio:capture-setup');if(listing||[...jobs.values()].some(j=>['starting','recording','stopping'].includes(j.status)))throw Error('采集正在运行，请先停止');listing=true;
    try{const apps=await new Promise((ok,fail)=>{const child=spawn(helper,['list']);children.add(child);let output='';const timer=setTimeout(()=>{stopChild(child);fail(Error('读取App超时，请检查macOS录制权限'));},60000);child.stdout.on('data',c=>{output+=c;if(output.length>200000){stopChild(child);fail(Error('App列表过大'));}});child.on('error',fail);child.on('close',code=>{clearTimeout(timer);children.delete(child);try{const value=JSON.parse(output.trim().split('\n').at(-1));if(code!==0||!Array.isArray(value.apps))throw Error(value.message||'读取App失败');ok(value.apps);}catch(e){fail(e);}});});send(res,200,{apps});}finally{listing=false;}return true;

@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {mkdir,readFile,writeFile,access} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {localPageRequest} from './local-origin.mjs';
 const ID=/^[a-f0-9-]{36}$/;
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 export function createLyricsAPI(root,{projects}){
@@ -21,7 +22,7 @@ export function createLyricsAPI(root,{projects}){
   child.on('exit',async code=>{clearTimeout(timer);j.child=null;if(j.status!=='running')return;try{if(code!==0)throw Error(stderr.trim().slice(-1000)||`${j.kind} 处理器退出（${code}）`);const result=JSON.parse(await readFile(resolve(j.folder,'result.json'),'utf8'));if(j.projectId)await projects.saveLyrics(j.projectId,j.runId,result,j.kind);j.status='done';j.progress=1;j.message=j.kind==='chords'?'和弦分析完成':'中文歌词识别完成';}catch(error){j.status='error';j.message=error.message;}await save(j);});
  }
  async function handle(req,res,url){if(!url.pathname.startsWith('/api/lyrics/'))return false;try{
-  if(!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(req.headers.host||'')||req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`){json(res,403,{error:'仅允许本机页面'});return true;}
+  if(!localPageRequest(req)){json(res,403,{error:'仅允许本机或局域网同源页面'});return true;}
   if(url.pathname==='/api/lyrics/health'&&req.method==='GET'){json(res,200,await health());return true;}
   if(url.pathname==='/api/lyrics/jobs'&&req.method==='POST'){
    if(admitting||[...jobs.values()].some(j=>j.status==='running')){json(res,409,{error:'已有歌词任务处理中'});return true;}admitting=true;

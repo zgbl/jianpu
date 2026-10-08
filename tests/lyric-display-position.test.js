@@ -70,3 +70,22 @@ test('相邻小节的密集句尾和句首各留本小节，实际第二段由�
  const p=layout(s);assert.equal(p.verseCount,2);
  for(const item of p.timedLyrics){const m=p.measures[item.mi];assert.equal(item.verse,2);assert.equal(item.mi,item.c.id.startsWith('left')?0:1);assert.ok(item.x>=m.x+12&&item.x<=m.x+m.width-18);}
 });
+
+test('anticipated lyric follows its aligned downbeat note without changing acoustic time or manual placement',()=>{
+ const s=demo();s.lyrics=[];
+ const rest=s.measures[0].notes[0],n=s.measures[1].notes[0];
+ rest.degree=0;rest.gridTimeStart=0;rest.gridTimeEnd=2;
+ n.degree=3;n.gridTimeStart=2;n.gridTimeEnd=2.25;n.sourceTime=1.86;n.sourceEnd=2.2;n.timingAlignment={boundarySelected:true};
+ s.lyricAlignment={verse:1,displayMode:'characters',characters:[{id:'entry',text:'你',start:1.93,end:1.95,status:'acoustic'}]};
+ const before=structuredClone(s),p=layout(s);assert.equal(p.timedLyrics[0].mi,1);assert.equal(p.timedLyrics[0].x,p.positions.get(n.id).x);assert.deepEqual(s,before);
+ s.lyricAlignment.characters[0].placement={noteId:rest.id,offsetX:0,manual:true};assert.equal(layout(s).timedLyrics[0].mi,0);
+});
+
+test('first sung syllable just before pitch onset displays after a 0000 intro bar',()=>{
+ const s=demo();s.lyrics=[];const intro=s.measures[0],first=s.measures[1].notes[0];intro.introPlaceholder=true;
+ intro.notes.forEach((n,i)=>{n.degree=0;n.gridTimeStart=i*.285;n.gridTimeEnd=(i+1)*.285;delete n.sourceTime;delete n.sourceEnd;});
+ first.degree=5;first.sourceTime=1.232;first.sourceEnd=1.36;first.gridTimeStart=1.248;first.gridTimeEnd=1.36;
+ s.lyricAlignment={verse:1,displayMode:'characters',characters:[{id:'first-lyric',text:'你',start:1.103,end:1.123,status:'acoustic'}]};
+ const before=structuredClone(s),p=layout(s);
+ assert.equal(p.timedLyrics[0].mi,1);assert.equal(p.timedLyrics[0].x,p.positions.get(first.id).x);assert.deepEqual(s,before);
+});
